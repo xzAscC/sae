@@ -299,7 +299,7 @@ def get_small_test_config() -> FullConfig:
         data=DataConfig(
             model_name="google/gemma-2-2b",
             layer_name="model.layers.5",
-            dataset_name="openwebtext",
+            dataset_name="pyvene/axbench-concept10",
             max_length=256,
             batch_size=4,
             num_samples=1000,  # Small for testing

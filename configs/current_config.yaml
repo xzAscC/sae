@@ -1,0 +1,40 @@
+data:
+  batch_size: 8
+  cache_dir: null
+  dataset_name: openwebtext
+  dataset_split: train
+  layer_name: model.layers.15
+  max_length: 512
+  model_name: google/gemma-2-2b
+  num_samples: 100000
+  save_activations_path: null
+  streaming: false
+model:
+  bias: true
+  dtype: float32
+  hidden_dim: 9216
+  input_dim: 2304
+  k: 128
+  normalize_decoder: true
+  tied_weights: true
+training:
+  batch_size: 256
+  checkpoint_dir: checkpoints
+  early_stopping_patience: null
+  eval_every: 1000
+  grad_clip_norm: 1.0
+  l1_lambda: 0.0001
+  learning_rate: 0.001
+  log_dir: logs
+  log_every: 100
+  max_steps: null
+  num_epochs: 5
+  optimizer: adam
+  save_every: 5000
+  scheduler: null
+  scheduler_params: {}
+  train_val_split: 0.9
+  use_wandb: true
+  val_batch_size: 256
+  wandb_project: topk-sae-gemma2-2b
+  weight_decay: 0.0001
