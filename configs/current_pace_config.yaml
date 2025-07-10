@@ -1,0 +1,32 @@
+data:
+  concept_dir: ./concept
+  concept_index_path: ./concept_index.txt
+  max_concepts: 10000
+  normalize: true
+  train_val_split: 0.8
+model:
+  bias: true
+  dtype: float32
+  hidden_dim: 16384
+  input_dim: 4096
+  k: 512
+  normalize_decoder: true
+  tied_weights: true
+training:
+  batch_size: 128
+  checkpoint_dir: checkpoints/pace
+  early_stopping_patience: null
+  eval_every: 500
+  grad_clip_norm: 1.0
+  l1_lambda: 0.0001
+  learning_rate: 0.001
+  log_dir: logs/pace
+  log_every: 100
+  max_steps: null
+  num_epochs: 10
+  optimizer: adam
+  save_every: 2000
+  use_wandb: true
+  val_batch_size: 256
+  wandb_project: topk-sae-pace
+  weight_decay: 0.0001

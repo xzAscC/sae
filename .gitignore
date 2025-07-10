@@ -208,3 +208,9 @@ __marimo__/
 
 # model weights
 *.pt
+
+# datasets
+./concept/
+concept.zip
+concept_index.txt
+*.txt

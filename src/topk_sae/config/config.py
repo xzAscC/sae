@@ -68,13 +68,11 @@ class DataConfig:
         
     Example:
         >>> config = DataConfig(
-        ...     model_name="google/gemma-2-2b",
-        ...     layer_name="model.layers.15",
         ...     dataset_name="openwebtext"
         ... )
     """
-    model_name: str
-    layer_name: str
+    model_name: Optional[str] = None
+    layer_name: Optional[str] = None
     dataset_name: str = "openwebtext"
     dataset_split: str = "train"
     num_samples: Optional[int] = None
@@ -86,10 +84,6 @@ class DataConfig:
     
     def __post_init__(self) -> None:
         """Validate configuration parameters."""
-        if not self.model_name:
-            raise ValueError("model_name cannot be empty")
-        if not self.layer_name:
-            raise ValueError("layer_name cannot be empty")
         if self.max_length <= 0:
             raise ValueError(f"max_length must be positive, got {self.max_length}")
         if self.batch_size <= 0:

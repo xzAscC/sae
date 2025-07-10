@@ -357,4 +357,33 @@ def main() -> None:
             
         else:
             # Train model
-      
+            logging.info("Starting training...")
+            trainer.train(
+                num_epochs=training_config["num_epochs"],
+                eval_every=training_config["eval_every"],
+                save_every=training_config["save_every"],
+                log_every=training_config["log_every"],
+                max_steps=training_config.get("max_steps"),
+            )
+            
+            logging.info("Training completed successfully!")
+            
+            # Final evaluation
+            if val_loader is not None:
+                logging.info("Running final evaluation...")
+                final_metrics = trainer.evaluate(val_loader)
+                
+                logging.info("Final evaluation results:")
+                for key, value in final_metrics.items():
+                    logging.info(f"  {key}: {value:.4f}")
+                    
+    except Exception as e:
+        logging.error(f"Training failed with error: {e}")
+        raise
+        
+    logging.info("Script completed successfully!")
+
+
+if __name__ == "__main__":
+    main()
+ 
