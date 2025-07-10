@@ -1,0 +1,42 @@
+model:
+  input_dim: 512  # Will be auto-detected from data
+  hidden_dim: 2048  # 4x overcomplete
+  k: 32  # Top-k sparsity
+  tied_weights: true
+  normalize_decoder: true
+  bias: true
+  dtype: float32
+
+data:
+  model_name: "google/gemma-2-2b"
+  layer_name: "model.layers.5"  # Earlier layer for testing
+  dataset_name: "openwebtext"
+  dataset_split: "train"
+  num_samples: 1000  # Small for quick testing
+  max_length: 256  # Shorter sequences
+  batch_size: 4  # Small batch for activation collection
+  streaming: false
+  cache_dir: null
+  save_activations_path: null
+
+training:
+  num_epochs: 2  # Quick test
+  learning_rate: 0.001
+  optimizer: "adam"
+  weight_decay: 0.0001
+  l1_lambda: 0.0001
+  grad_clip_norm: 1.0
+  batch_size: 32  # Small training batches
+  val_batch_size: 64
+  train_val_split: 0.8
+  scheduler: null
+  scheduler_params: {}
+  eval_every: 50  # Frequent evaluation
+  save_every: 100
+  log_every: 10
+  max_steps: 200  # Limit steps for testing
+  early_stopping_patience: null
+  use_wandb: false  # No wandb for testing
+  wandb_project: "topk-sae-test"
+  log_dir: "logs/test"
+  checkpoint_dir: "checkpoints/test" 
