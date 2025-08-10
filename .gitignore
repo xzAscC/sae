@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# model weights
+*.pt
+
+# datasets
+./concept/
+concept.zip
+concept_index.txt
+*.txt
