@@ -214,3 +214,9 @@ __marimo__/
 concept.zip
 concept_index.txt
 *.txt
+
+# ipynb
+*.ipynb
+
+# assets
+assets/
