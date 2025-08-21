@@ -54,8 +54,7 @@ def load_sae_from_saelens(model_name: str, model_layer: int, trainer: int=5):
         raise ValueError(f"Model name {model_name} not supported")
     return sae
 
-def main() -> None:
-    """Main function to run the MSE vs sparsity trade-off analysis."""
+def plot_mse_sparsity_tradeoff() -> None:
     # Configuration
     args = config_setup()
     logger = logger_setup()
@@ -105,4 +104,4 @@ def main() -> None:
     plt.show()  # Display the plot
     
 if __name__ == "__main__":
-    main()
+    plot_mse_sparsity_tradeoff() 
