@@ -143,6 +143,15 @@ def train_sae() -> None:
         logger.info(
             f"Activation dim: {activation_dim}, Dictionary dim: {dictionary_dim}"
         )
+    elif args.model_name == "openai-community/gpt2":
+        model_kwargs["torch_dtype"] = torch.bfloat16
+        model = nnsight.LanguageModel(args.model_name, **model_kwargs)
+        model_layer_name = "transformer"
+        activation_dim = getattr(model, model_layer_name).wte.weight.shape[1]
+        dictionary_dim = args.dictionary_factor * activation_dim
+        logger.info(
+            f"Activation dim: {activation_dim}, Dictionary dim: {dictionary_dim}"
+        )
     else:
         raise ValueError(f"Model {args.model_name} not supported")
 

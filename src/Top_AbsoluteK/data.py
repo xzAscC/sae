@@ -132,12 +132,16 @@ class ActivationBuffer:
                     **tracer_kwargs,
                     invoker_args={"truncation": True, "max_length": self.ctx_len},
                 ):
-                    
-                    hidden_states = getattr(self.model, self.model_layer_name).layers[self.model_layer].output.save()
+                    if self.model_layer_name == "transformer":
+                        hidden_states = getattr(self.model, self.model_layer_name).h[self.model_layer].output.save()
+                    else:
+                        hidden_states = getattr(self.model, self.model_layer_name).layers[self.model_layer].output.save()
                     input = self.model.inputs.save()
 
-                    getattr(self.model, self.model_layer_name).layers[self.model_layer].output.stop()
-                
+                    if self.model_layer_name == "transformer":
+                        getattr(self.model, self.model_layer_name).h[self.model_layer].output.stop()
+                    else:
+                        getattr(self.model, self.model_layer_name).layers[self.model_layer].output.stop()
             mask = input[1]["attention_mask"] != 0
             
             if isinstance(hidden_states, tuple):
@@ -145,7 +149,7 @@ class ActivationBuffer:
 
             if self.remove_bos:
                 if self.model.tokenizer.bos_token_id is not None:
-                    bos_mask = input_data.value[1]["input_ids"] == self.model.tokenizer.bos_token_id
+                    bos_mask = input[1]["input_ids"] == self.model.tokenizer.bos_token_id
                     mask = mask & ~bos_mask
                 else:
                     # some models (like Qwen) don't have a bos token, so we need to remove the first non-pad token
