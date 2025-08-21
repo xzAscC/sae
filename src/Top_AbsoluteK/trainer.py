@@ -127,7 +127,7 @@ def train_sae() -> None:
         model_kwargs["torch_dtype"] = torch.bfloat16
         model = nnsight.LanguageModel(args.model_name, **model_kwargs)
         model_layer_name = "model"
-        activation_dim = getattr(model, model_layer_name).embed_in.weight.shape[1]
+        activation_dim = getattr(model, model_layer_name).embed_tokens.weight.shape[1]
         dictionary_dim = args.dictionary_factor * activation_dim
         logger.info(
             f"Activation dim: {activation_dim}, Dictionary dim: {dictionary_dim}"
