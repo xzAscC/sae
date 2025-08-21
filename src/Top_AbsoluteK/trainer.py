@@ -91,8 +91,10 @@ def train_sae() -> None:
     args = config()
 
     # logger setup
+    model_name = args.model_name.split("/")[-1]
+    dataset_name = args.dataset.split("/")[-1]
     logger.add(
-        f"{args.log_path}/trainer_{args.model_name}_Layer{args.model_layer}_{args.sae_name}SAE_{args.dataset}.log",
+        f"{args.log_path}/trainer_{model_name}_Layer{args.model_layer}_{args.sae_name}SAE_{dataset_name}.log",
         rotation="100 MB",
         retention="10 days",
     )
@@ -166,8 +168,6 @@ def train_sae() -> None:
     )
 
     # Create a timestamped save directory
-    dataset_name = args.dataset.split("/")[-1]
-    model_name = args.model_name.split("/")[-1]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_dir = os.path.join(
         "logs",
@@ -206,6 +206,7 @@ def train_sae() -> None:
         )
     else:
         raise ValueError(f"SAE {args.sae_name} not supported")
+    # TODO: gmail notification
     return None
 
 
