@@ -18,11 +18,11 @@ for model_name in "EleutherAI/pythia-70m" "google/gemma-2-2b" "Qwen/Qwen3-4B-Thi
         --model_name $model_name \
         --model_layer $model_layer \
         --dataset "monology/pile-uncopyrighted" \
-        --sae_name "absolutek" \
+        --sae_name "topk" \
         --batch_size 128 \
         --k $k \
         --steps 10000 \
-        --log_path "logs/absolutek_training" \
+        --log_path "logs/topk_training" \
         --save_steps 1000
     done
 done
