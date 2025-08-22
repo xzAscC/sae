@@ -2,7 +2,7 @@ auxk_alpha: 0.03125
 batch_size: 32
 config_save_path: ./scripts/trainer_{model_name}_Layer{model_layer}_{sae_name}SAE_{dataset}.yaml
 ctx_len: 1024
-dataset: pyvene/axbench-concept16k_v2
+dataset: monology/pile-uncopyrighted
 decay_start: null
 device: cuda
 dictionary_factor: 8

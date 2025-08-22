@@ -197,6 +197,9 @@ def load_dataset(dataset_name: str, split: str = "train", streaming: bool = True
     if dataset_name == "pyvene/axbench-concept16k_v2":
         dataset = datasets.load_dataset("pyvene/axbench-concept16k_v2", split=split, streaming=streaming)
         data_column_name = "output"
+    elif dataset_name == "monology/pile-uncopyrighted":
+        dataset = datasets.load_dataset("monology/pile-uncopyrighted", split=split, streaming=streaming)
+        data_column_name = "text"
     else:
         raise ValueError(f"Dataset {dataset_name} not supported")
     

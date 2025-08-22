@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 from utils import seed_setup
 from data import ActivationBuffer, load_dataset
-from sae import TopKSAE
+from sae import TopKSAE, AbsoluteKSAE
 
 load_dotenv()
 
@@ -48,14 +48,14 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         type=str,
-        default="pyvene/axbench-concept16k_v2",
+        default="monology/pile-uncopyrighted",
         help="Dataset name",
         choices=["pyvene/axbench-concept16k_v2", "monology/pile-uncopyrighted"],
     )
     parser.add_argument(
         "--sae_name",
         type=str,
-        default="topk",
+        default="absolutek",
         help="SAE name",
         choices=["topk", "absolutek"],
     )
@@ -248,16 +248,50 @@ def train_sae() -> None:
             threshold_start_step=args.threshold_start_step,
             name=f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name}_{timestamp}",
         )
+    elif args.sae_name == "absolutek":
+        sae = AbsoluteKSAE(
+            activation_dim=activation_dim,
+            dict_size=dictionary_dim,
+            k=args.k,
+        )
+        sae.to(device)
+        sae.train(
+            data=buffer,
+            warmup_steps=warmup_steps,
+            sparsity_warmup_steps=sparsity_warmup_steps,
+            save_dir=save_dir,
+            save_steps=save_steps,
+            steps=args.steps,
+            device=args.device,
+            lr=args.lr,
+            auxk_alpha=args.auxk_alpha,
+            decay_start=args.decay_start,
+            name=f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name}_{timestamp}",
+        )
     else:
         raise ValueError(f"SAE {args.sae_name} not supported")
 
-    notify_gmail(f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name} training completed")
+    notify_gmail(
+        message=f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name} training completed",
+        subject=f"SAE Training Completed - {model_name} Layer {args.model_layer} {args.sae_name} SAE {args.dataset}"
+    )
     return None
 
-def notify_gmail(message: str) -> None:
+def notify_gmail(message: str, subject: str = "SAE Training Notification") -> None:
+    """
+    Notify via gmail
+
+    Args:
+        message (str): Message to send
+        subject (str): Subject of the email
+
+    Returns:
+        None
+    """
     notifier = apprise.Apprise()
     notifier.add(f"mailto://{APPRISE_GMAIL}:{APPRISE_PWD}@gmail.com")
-    notifier.notify(message)
+    
+    notifier.notify(body=message, title=subject)
     return None
 
 if __name__ == "__main__":
