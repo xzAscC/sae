@@ -3,13 +3,19 @@ import os
 import yaml
 import torch
 import nnsight
+import apprise
 from datetime import datetime
 from loguru import logger
+from dotenv import load_dotenv
 
 from utils import seed_setup
 from data import ActivationBuffer, load_dataset
 from sae import TopKSAE
 
+load_dotenv()
+
+APPRISE_GMAIL = os.getenv("APPRISE_GMAIL")
+APPRISE_PWD = os.getenv("APPRISE_PWD")
 
 def config() -> argparse.Namespace:
     """
@@ -208,7 +214,7 @@ def train_sae() -> None:
     # Create a timestamped save directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_dir = os.path.join(
-        "logs",
+        args.log_path,
         f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name}_{timestamp}",
     )
     os.makedirs(save_dir, exist_ok=True)
@@ -244,9 +250,15 @@ def train_sae() -> None:
         )
     else:
         raise ValueError(f"SAE {args.sae_name} not supported")
-    # TODO: gmail notification
+
+    notify_gmail(f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name} training completed")
     return None
 
+def notify_gmail(message: str) -> None:
+    notifier = apprise.Apprise()
+    notifier.add(f"mailto://{APPRISE_GMAIL}:{APPRISE_PWD}@gmail.com")
+    notifier.notify(message)
+    return None
 
 if __name__ == "__main__":
     train_sae()

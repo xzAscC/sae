@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "apprise>=1.9.4",
     "einops>=0.8.1",
     "huggingface-hub>=0.34.4",
     "ipykernel>=6.30.1",
