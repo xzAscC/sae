@@ -27,7 +27,16 @@ def config() -> argparse.Namespace:
         help="Path to save the configuration",
     )
     parser.add_argument(
-        "--model_name", type=str, default="EleutherAI/pythia-70m", help="LLM model name"
+        "--model_name",
+        type=str,
+        default="EleutherAI/pythia-70m",
+        help="LLM model name",
+        choices=[
+            "EleutherAI/pythia-70m",
+            "google/gemma-2-2b",
+            "Qwen/Qwen3-4B-Thinking-2507",
+            "openai-community/gpt2",
+        ],
     )
     parser.add_argument("--model_layer", type=int, default=3, help="LLM model layer")
     parser.add_argument(
@@ -35,8 +44,15 @@ def config() -> argparse.Namespace:
         type=str,
         default="pyvene/axbench-concept16k_v2",
         help="Dataset name",
+        choices=["pyvene/axbench-concept16k_v2", "monology/pile-uncopyrighted"],
     )
-    parser.add_argument("--sae_name", type=str, default="topk", help="SAE name")
+    parser.add_argument(
+        "--sae_name",
+        type=str,
+        default="topk",
+        help="SAE name",
+        choices=["topk", "absolutek"],
+    )
     parser.add_argument("--verbose", type=bool, default=True, help="Verbose mode")
     parser.add_argument(
         "--seed", type=int, default=42, help="Seed for random number generator"
@@ -57,8 +73,12 @@ def config() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--auxk_alpha", type=float, default=1 / 32, help="Auxiliary k")
     parser.add_argument("--decay_start", type=int, default=None, help="Decay start")
-    parser.add_argument("--threshold_beta", type=float, default=0.999, help="Threshold beta")
-    parser.add_argument("--threshold_start_step", type=int, default=1000, help="Threshold start step")
+    parser.add_argument(
+        "--threshold_beta", type=float, default=0.999, help="Threshold beta"
+    )
+    parser.add_argument(
+        "--threshold_start_step", type=int, default=1000, help="Threshold start step"
+    )
 
     # save the args
     def save_args(args: argparse.Namespace) -> None:
