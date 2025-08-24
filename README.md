@@ -15,3 +15,6 @@ sae/
 └── LICENSE                     # Project license
 ```
 
+## TODO
+
+- Train more steps and Epoch
