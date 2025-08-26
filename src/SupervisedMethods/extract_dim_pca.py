@@ -20,8 +20,8 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--model_name",
         type=str,
-        default="EleutherAI/pythia-70m",
-        choices=["EleutherAI/pythia-70m"],
+        default="google/gemma-2-2b",
+        choices=["EleutherAI/pythia-70m", "google/gemma-2-2b", "Qwen/Qwen3-4B-Thinking-2507", "openai-community/gpt2"],
         help="Model to use",
     )
     parser.add_argument(
@@ -122,6 +122,12 @@ def extract_dim_pca() -> None:
     if args.model_name == "EleutherAI/pythia-70m":
         assert args.model_layer < 6
         model_layer_name = "gpt_neox"
+    elif args.model_name == "google/gemma-2-2b":
+        assert args.model_layer < 12
+        model_layer_name = "model"
+    elif args.model_name == "Qwen/Qwen3-4B-Thinking-2507":
+        assert args.model_layer < 24
+        model_layer_name = "model"
     else:
         raise ValueError(f"Model {args.model_name} not supported")
     logger.info(args)
@@ -133,10 +139,20 @@ def extract_dim_pca() -> None:
     keys_len = len(dataset_dict.keys()) - 1
     # fig 1 for cos similarity between diff_in_means and pca_first_5_components
     fig, ax = plt.subplots(keys_len, 1, figsize=(10, max(6, 2 * keys_len)))
-    neg_diff_in_means = torch.empty(
-        getattr(model, model_layer_name).embed_in.weight.shape[1]
-    )
-
+    if args.model_name == "EleutherAI/pythia-70m":
+        neg_diff_in_means = torch.empty(
+            getattr(model, model_layer_name).embed_in.weight.shape[1]
+        )
+    elif args.model_name == "google/gemma-2-2b":
+        neg_diff_in_means = torch.empty(
+            getattr(model, model_layer_name).embed_tokens.weight.shape[1]
+        )
+    elif args.model_name == "Qwen/Qwen3-4B-Thinking-2507":
+        neg_diff_in_means = torch.empty(
+            getattr(model, model_layer_name).embed_tokens.weight.shape[1]
+        )
+    else: 
+        raise ValueError(f"Model {args.model_name} not supported")
     # fig 2 for heatmap of pca_first_5_components
     heatmap_fig, heatmap_ax = plt.subplots(keys_len, 1, figsize=(10, keys_len * 10))
     for idx, (key, value) in enumerate(dataset_dict.items()):
