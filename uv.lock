@@ -1122,6 +1122,15 @@ wheels = [
 ]
 
 [[package]]
+name = "ipynb"
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/73/fd7b6497883c180e870712216348cf0f3271b75347f75cffbf28cf633d7e/ipynb-0.5.1.tar.gz", hash = "sha256:8d834c777ca3885289938728cc382f081c86a58e92961e86f0aba60c96938ce5", size = 3938, upload-time = "2017-10-23T06:25:52.279Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/31/42/4c0bbb66390e3a68e04ebf134c8d074a00c18b5882293f8ace5f7497fbf0/ipynb-0.5.1-py3-none-any.whl", hash = "sha256:9686aafce6fd58ec160fa6ba649a7810df89cc0f06a317188ac5e59fd728e325", size = 6885, upload-time = "2017-10-23T06:25:54.199Z" },
+]
+
+[[package]]
 name = "ipython"
 version = "9.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2714,10 +2723,12 @@ dependencies = [
     { name = "einops" },
     { name = "huggingface-hub" },
     { name = "ipykernel" },
+    { name = "ipynb" },
     { name = "loguru" },
     { name = "mlflow" },
     { name = "nnsight" },
     { name = "pandas" },
+    { name = "pytest" },
     { name = "sae-lens" },
     { name = "safetensors" },
     { name = "seaborn" },
@@ -2730,10 +2741,12 @@ requires-dist = [
     { name = "einops", specifier = ">=0.8.1" },
     { name = "huggingface-hub", specifier = ">=0.34.4" },
     { name = "ipykernel", specifier = ">=6.30.1" },
+    { name = "ipynb", specifier = ">=0.5.1" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "mlflow", specifier = ">=3.3.1" },
     { name = "nnsight", specifier = ">=0.4.11" },
     { name = "pandas", specifier = ">=2.3.1" },
+    { name = "pytest", specifier = ">=8.4.1" },
     { name = "sae-lens", specifier = ">=6.6.0" },
     { name = "safetensors", specifier = ">=0.4.5" },
     { name = "seaborn", specifier = ">=0.13.2" },

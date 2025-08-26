@@ -1,107 +1,153 @@
 """
-MSE vs Sparsity Trade-off Analysis for SAELens and local SAE.
+    MSE vs Sparsity Trade-off Analysis for SAELens and local SAE.
 
 This module analyzes the trade-off between Mean Squared Error (MSE) and sparsity
 in Sparse AutoEncoders (SAE) using different sparsity regularization strengths.
 """
 
 # TODO: clean this file
-import sae_lens
 import argparse
+import os
 import sys
-import sae_lens
 import torch
 import datasets
 import nnsight
 from loguru import logger
-from sae import TopKSAE
+from sae import TopKSAE, AbsoluteKSAE
 import matplotlib.pyplot as plt
+
 
 def config_setup():
     parser = argparse.ArgumentParser(
         description="Sparse AutoEncoder with MSE vs Sparsity Trade-off Analysis"
     )
-
     parser.add_argument(
-        "--use_saelens", action="store_true", help="Use SAELens SAE", default=True
-    )
-    parser.add_argument(
-        "--saelens_model_name",
+        "--sae_name",
         type=str,
-        help="SAELens model name",
-        default="sae_bench_gemma-2-2b_topk_width-2pow12_date-1109",
+        help="SAE name",
+        default="topk",
+        choices=["topk", "absolutek"],
     )
     parser.add_argument(
-        "--saelens_model_layer", type=int, help="SAELens model layer", default=12
+        "--model_name",
+        type=str,
+        help="Model name",
+        default="EleutherAI/pythia-70m",
+        choices=[
+            "google/gemma-2-2b",
+            "EleutherAI/pythia-70m",
+            "Qwen/Qwen3-4B-Thinking-2507",
+            "openai-community/gpt2",
+        ],
+    )
+    parser.add_argument("--model_layer", type=int, help="Model layer", default=3)
+    parser.add_argument("--k", type=int, help="k", default=230)
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        help="Dataset",
+        default="pyvene/axbench-concept16k_v2",
+        choices=["monology/pile-uncopyrighted", "pyvene/axbench-concept16k_v2"],
+    )
+    parser.add_argument(
+        "--log_path", type=str, help="Log path", default="logs/mse_sparsity_tradeoff_absolutek"
+    )
+    parser.add_argument(
+        "--local_sae_path",
+        type=str,
+        help="Local SAE path",
+        default="logs/SAEtopk_pythia-70m_Layer3_pile-uncopyrighted_20250822_025537/SAE_final.safetensors",
+    )
+    parser.add_argument(
+        "--dictionary_factor", type=int, help="Dictionary factor", default=8
     )
 
     return parser.parse_args()
 
 
-def logger_setup():
-    logger.add("logs/mse_sparsity_tradeoff.log", rotation="100 MB", retention="10 days")
-    logger.add(sys.stdout, level="INFO")
-    return logger
-
-def load_sae_from_saelens(model_name: str, model_layer: int, trainer: int=5):
-    if model_name == "sae_bench_gemma-2-2b_topk_width-2pow12_date-1109":
-        sae = TopKSAE(activation_dim=2304, dict_size=4096, k=10)
-        sae = sae.from_pretrained(use_saelens=True, model_name=model_name, model_layer=model_layer, trainer=trainer, device="cpu")
-    elif model_name == "sae_bench_pythia70m_sweep_gated_ctx128_0730":
-        sae = TopKSAE(activation_dim=2304, dict_size=4096, k=10)
-        sae = sae.from_pretrained(use_saelens=True, model_name=model_name, model_layer=model_layer, trainer=trainer, device="cpu")
-    else:
-        raise ValueError(f"Model name {model_name} not supported")
-    return sae
-
 def plot_mse_sparsity_tradeoff() -> None:
     # Configuration
     args = config_setup()
-    logger = logger_setup()
+    logger.add(
+        os.path.join(args.log_path, "mse_sparsity_tradeoff.log"),
+        rotation="100 MB",
+        retention="10 days",
+    )
     # Check for CUDA availability
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("=" * 80)
     logger.info(f"args: {args}")
-    if args.use_saelens:
-        sae = load_sae_from_saelens(args.saelens_model_name, args.saelens_model_layer)
-        sae.to(device)
+    model = nnsight.LanguageModel(
+        args.model_name, device_map="auto", torch_dtype=torch.bfloat16
+    )
+
+    if args.model_name == "google/gemma-2-2b":
+        activation_dim = model.model.embed_tokens.weight.shape[1]
+    elif args.model_name == "EleutherAI/pythia-70m":
+        activation_dim = model.gpt_neox.embed_in.weight.shape[1]
+    elif args.model_name == "Qwen/Qwen3-4B-Thinking-2507":
+        activation_dim = model.model.embed_tokens.weight.shape[1]
+    elif args.model_name == "openai-community/gpt2":
+        activation_dim = model.transformer.wte.weight.shape[1]
     else:
-        # TODO: load local SAE
-        pass
+        raise ValueError(f"Invalid model name: {args.model_name}")
+
+    dictionary_size = args.dictionary_factor * activation_dim
+    if args.sae_name == "topk":
+        sae = TopKSAE(
+            activation_dim=activation_dim, dict_size=dictionary_size, k=args.k
+        )
+    elif args.sae_name == "absolutek":
+        sae = AbsoluteKSAE(
+            activation_dim=activation_dim, dict_size=dictionary_size, k=args.k
+        )
+    else:
+        raise ValueError(f"Invalid SAE name: {args.sae_name}")
+
+    sae.from_pretrained(args.local_sae_path, device=device)
+    sae.to(device)
 
     # Run analysis
     logger.info("Starting MSE vs Sparsity trade-off analysis...")
-    data = datasets.load_dataset("pyvene/axbench-concept16k_v2", split="train")
-    dataset = [data[i]["output"] for i in range(2)]
-    model = nnsight.LanguageModel("google/gemma-2-2b", device_map="auto")
-    model.to(torch.bfloat16)
+    if args.dataset == "monology/pile-uncopyrighted":
+        data = datasets.load_dataset(args.dataset, split="train")
+        dataset = [data[i]["text"] for i in range(1)]
+    elif args.dataset == "pyvene/axbench-concept16k_v2":
+        data = datasets.load_dataset(args.dataset, split="train")
+        dataset = [data[i]["output"] for i in range(1)]
+    else:
+        raise ValueError(f"Invalid dataset: {args.dataset}")
+
     k_list = []
     mse_loss_list = []
     for k in range(10, 1000, 10):
-        with model.trace(dataset):
-            # For Gemma2 models, layers are accessed through model.model.layers
-            res_x = model.model.layers[12].output.save()
-        torch.cuda.empty_cache()
-        res_x = res_x[0].reshape(-1, 2304).to(device)
-        sae.k = k
-        res_x_hat = sae.forward(res_x)
-        mse_loss = torch.nn.functional.mse_loss(res_x_hat, res_x)
-        logger.info(f"MSE loss: {mse_loss}, k: {k}")
+        with model.trace("This is a test sentence", invoker_args={"truncation": True, "max_length": 1024}):
+            res_x = model.gpt_neox.layers[args.model_layer].output.save()
+        res_x = res_x[0].to(device).reshape(-1, activation_dim).detach()
+
+        sae.k = 230
+        with torch.no_grad():
+            loss = 0
+            loss = sae.test(res_x)
         k_list.append(k)
-        mse_loss_list.append(mse_loss.item())
-        
-    plt.plot(k_list, mse_loss_list, label="AbsoluteK")
-    
-    # Add red vertical line at k = 230
-    plt.axvline(x=230, color='red', linestyle='--', linewidth=2, label='k = 230')
-    
+        mse_loss_list.append(loss.item())
+        print(mse_loss_list)
+        exit()
+        logger.info(f"k: {k}, loss: {loss.item()}")
+
+    plt.plot(k_list, mse_loss_list, label=args.sae_name)
+
+    plt.axvline(
+        x=args.k, color="red", linestyle="--", linewidth=2, label=f"k = {args.k}"
+    )
+
     plt.xlabel("k")
     plt.ylabel("MSE loss")
     plt.title("MSE vs Sparsity Trade-off")
     plt.legend()
-    
+
     plt.savefig("mse_sparsity_tradeoff.png")
-    plt.show()  # Display the plot
-    
+
+
 if __name__ == "__main__":
-    plot_mse_sparsity_tradeoff() 
+    plot_mse_sparsity_tradeoff()

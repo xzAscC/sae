@@ -55,7 +55,7 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--sae_name",
         type=str,
-        default="absolutek",
+        default="topk",
         help="SAE name",
         choices=["topk", "absolutek"],
     )
@@ -69,15 +69,15 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--dictionary_factor", type=int, default=8, help="Dictionary factor"
     )
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
+    parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
     parser.add_argument("--n_ctxs", type=int, default=1000, help="Number of contexts")
     parser.add_argument("--ctx_len", type=int, default=1024, help="Context length")
 
-    parser.add_argument("--steps", type=int, default=10000, help="Number of steps")
+    parser.add_argument("--steps", type=int, default=2000, help="Number of steps")
     parser.add_argument("--save_steps", type=int, default=1000, help="save steps")
-    parser.add_argument("--k", type=int, default=230, help="Number of top-k features")
+    parser.add_argument("--k", type=int, default=50, help="Number of top-k features")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--auxk_alpha", type=float, default=1 / 32, help="Auxiliary k")
+    parser.add_argument("--auxk_alpha", type=float, default=1/32, help="Auxiliary k")
     parser.add_argument("--decay_start", type=int, default=None, help="Decay start")
     parser.add_argument(
         "--threshold_beta", type=float, default=0.999, help="Threshold beta"
