@@ -20,7 +20,7 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--model_name",
         type=str,
-        default="Qwen/Qwen3-4B-Thinking-2507",
+        default="google/gemma-2-2b",
         choices=["EleutherAI/pythia-70m", "google/gemma-2-2b", "Qwen/Qwen3-4B-Thinking-2507", "openai-community/gpt2"],
         help="Model to use",
     )
@@ -37,7 +37,7 @@ def config() -> argparse.Namespace:
         default="logs/supervised_methods/",
         help="Directory to save logs",
     )
-    parser.add_argument("--model_layer", type=int, default=3, help="Model layer to use")
+    parser.add_argument("--model_layer", type=int, default=12, help="Model layer to use")
     parser.add_argument("--debug_mode", type=bool, default=True, help="Debug mode")
     return parser.parse_args()
 
@@ -53,11 +53,11 @@ def load_concept_dataset(dataset_name: str) -> dict:
     dataset_dict = {}
     dataset = datasets.load_dataset(dataset_name, split="train")
     for idx, data in tqdm(enumerate(dataset), desc="Loading dataset"):
-        if idx > 1100:
+        if idx > 500:
             break
         elif dataset_dict.get(data["output_concept"]) is None:
             dataset_dict[data["output_concept"]] = []
-        elif len(dataset_dict[data["output_concept"]]) > 10:
+        elif len(dataset_dict[data["output_concept"]]) > 5:
             continue
         else:
             dataset_dict[data["output_concept"]].append(data["output"])
@@ -90,7 +90,7 @@ def dim_pca_vector(
             .mean(dim=0)
             .to(hidden_states.device)
             .float()
-            - neg_diff_in_means
+            # - neg_diff_in_means
         )
         # PCA
         pca = PCA(n_components=5).fit(
@@ -176,12 +176,12 @@ def extract_dim_pca() -> None:
 
             # plot the cos similarity between diff_in_means and pca_first_5_components
             cos_similarity = torch.nn.functional.cosine_similarity(
-                diff_in_means, pca_first_5_components, dim=0
+                diff_in_means, pca_first_5_components, dim=1
             )
+            if args.debug_mode:
+                logger.info(f"Cos similarity: {cos_similarity.shape}")
             ax[idx - 1].plot(cos_similarity.detach().cpu().numpy())
             ax[idx - 1].set_title(f"{key}", pad=8, fontsize=10)
-            ax[idx - 1].set_ylim(0, 1)
-            ax[idx - 1].set_xlim(0, 5)
             for lbl in ax[idx - 1].get_xticklabels():
                 lbl.set_rotation(45)
                 lbl.set_ha("right")
