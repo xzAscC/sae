@@ -15,6 +15,12 @@ sae/
 └── LICENSE                     # Project license
 ```
 
+## Utils
+
+### Questions
+
+- if no enough memory: first 
+
 ## TODO
 
 - Train more steps and Epoch

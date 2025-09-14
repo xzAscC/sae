@@ -11,6 +11,19 @@ tracer_kwargs = {"scan": True, "validate": True}
 class ActivationBuffer:
     """
     Activation buffer for the residual stream of the model
+
+    Args:
+        data: Dataset
+        model: Language model
+        model_layer_name: Name of the model layer
+        model_layer: Layer number
+        d_submodule: Dimension of the submodule
+        n_ctxs: Number of contexts
+        ctx_len: Context length
+        device: Device
+        batch_size: Batch size
+        remove_bos: Whether to remove the BOS token
+        add_special_token: Whether to add a special token
     """
 
     data: datasets.Dataset
@@ -56,8 +69,7 @@ class ActivationBuffer:
             self.read[idxs] = True
             return self.activations[idxs]
 
-    def text_batch(self, batch_size=None):
-        # TODO: length enough?
+    def text_batch(self, batch_size=None) -> list[str]:
         """
         Return a list of text
         """
@@ -160,7 +172,6 @@ class ActivationBuffer:
             hidden_states = hidden_states[mask]
 
             remaining_space = self.activation_buffer_size - current_idx
-            assert remaining_space > 0
             hidden_states = hidden_states[:remaining_space]
 
             self.activations[current_idx : current_idx + len(hidden_states)] = hidden_states.to(
@@ -171,7 +182,10 @@ class ActivationBuffer:
         self.read = torch.zeros(len(self.activations), dtype=torch.bool, device=self.device)
 
     @property
-    def config(self):
+    def config(self) -> dict:
+        """
+        Return the configuration of the activation buffer
+        """
         return {
             "d_submodule": self.d_submodule,
             "d_dictionary": self.d_dictionary,
@@ -179,6 +193,12 @@ class ActivationBuffer:
             "ctx_len": self.ctx_len,
             "device": self.device,
             "batch_size": self.batch_size,
+            "remove_bos": self.remove_bos,
+            "add_special_token": self.add_special_token,
+            "model_layer_name": self.model_layer_name,
+            "model_layer": self.model_layer,
+            "model": self.model,
+            "data": self.data,            
         }
 
 
@@ -199,6 +219,9 @@ def load_dataset(dataset_name: str, split: str = "train", streaming: bool = True
         data_column_name = "output"
     elif dataset_name == "monology/pile-uncopyrighted":
         dataset = datasets.load_dataset("monology/pile-uncopyrighted", split=split, streaming=streaming)
+        data_column_name = "text"
+    elif dataset_name == "Salesforce/wikitext":
+        dataset = datasets.load_dataset("Salesforce/wikitext", split=split, streaming=streaming)
         data_column_name = "text"
     else:
         raise ValueError(f"Dataset {dataset_name} not supported")

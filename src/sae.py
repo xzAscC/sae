@@ -1,11 +1,9 @@
 import torch
 import einops
-import datasets
 import os
-import sae_lens
 import mlflow
-import nnsight
 import numpy as np
+import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
 from typing import Optional, overload
 from contextlib import nullcontext
@@ -13,6 +11,7 @@ from loguru import logger
 from typing import Callable
 from tqdm import tqdm
 from safetensors.torch import load_file, save_file
+
 
 class Dictionary(ABC, torch.nn.Module):
     """
@@ -135,8 +134,8 @@ def remove_gradient_parallel_to_decoder_directions(
     d_sae: int,
 ) -> torch.Tensor:
     """There's a major footgun here: we use this with both nn.Linear and nn.Parameter decoders.
-    nn.Linear stores the decoder weights in a transposed format (d_model, d_sae). So, we pass the dimensions in
-    to catch this error."""
+    nn.Linear stores the decoder weights in a transposed format (d_model, d_sae). So, we pass the dimensions in to catch this error.
+    """
 
     D, F = W_dec_DF.shape
     assert D == activation_dim
@@ -219,7 +218,7 @@ class TopKSAE(Dictionary, torch.nn.Module):
         self.encoder.bias.data.zero_()
 
         self.b_dec = torch.nn.Parameter(torch.zeros(activation_dim))
-        
+
     @property
     def k(self):
         return self.k_buffer.item()
@@ -256,18 +255,17 @@ class TopKSAE(Dictionary, torch.nn.Module):
         post_topk = pre_activation_BF.topk(self.k, sorted=False, dim=-1)
 
         # We can't split immediately due to nnsight
-        tops_acts_BK = post_topk.values
         top_indices_BK = post_topk.indices
 
         buffer_BF = torch.zeros_like(pre_activation_BF)
         encoded_acts_BF = buffer_BF.scatter_(
-            dim=-1, index=top_indices_BK, src=tops_acts_BK
+            dim=-1, index=top_indices_BK, src=post_topk.values
         )
 
         if return_topk:
             return (
                 encoded_acts_BF,
-                tops_acts_BK,
+                post_topk.values,
                 top_indices_BK,
                 pre_activation_BF,
             )  # Return pre-ReLU
@@ -288,7 +286,7 @@ class TopKSAE(Dictionary, torch.nn.Module):
 
         self.load_state_dict(checkpoint)
         self.to(device)
-        
+
         return self
 
     def train(
@@ -346,7 +344,9 @@ class TopKSAE(Dictionary, torch.nn.Module):
                     # TODO: for epoch?
 
                     # training
-                    step_losses = self.update_step(step, act, device, optimizer, scheduler)
+                    step_losses = self.update_step(
+                        step, act, device, optimizer, scheduler
+                    )
 
                     if save_steps and step in save_steps:
                         self.save_checkpoint(step)
@@ -380,7 +380,14 @@ class TopKSAE(Dictionary, torch.nn.Module):
                     )
                     logger.info(f"Saved final SAE to {save_dir}")
 
-    def update_step(self, step: int, act: torch.Tensor, device: str, optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler.LambdaLR) -> float:
+    def update_step(
+        self,
+        step: int,
+        act: torch.Tensor,
+        device: str,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.LambdaLR,
+    ) -> float:
         """
         Update the step and return the losses.
         """
@@ -422,9 +429,7 @@ class TopKSAE(Dictionary, torch.nn.Module):
         if k_anneal_steps is None:
             return
 
-        assert (
-            0 <= k_anneal_steps < steps
-        ), "k_anneal_steps must be >= 0 and < steps."
+        assert 0 <= k_anneal_steps < steps, "k_anneal_steps must be >= 0 and < steps."
         # self.k is the target k set for the trainer, not the dictionary's current k
         assert activation_dim > self.k, "activation_dim must be greater than k"
 
@@ -435,7 +440,7 @@ class TopKSAE(Dictionary, torch.nn.Module):
         # Update in-place
         self.k.fill_(int(annealed_value))
 
-    def loss(self, x: torch.Tensor, step: int=0):
+    def loss(self, x: torch.Tensor, step: int = 0):
         # Run the SAE
         f, top_acts_BK, top_indices_BK, post_relu_acts_BF = self.encode(
             x, return_topk=True, use_threshold=False
@@ -495,14 +500,12 @@ class TopKSAE(Dictionary, torch.nn.Module):
                 )
 
     def test(self, x: torch.Tensor):
-        f, _, _, _ = self.encode(
-            x, return_topk=True, use_threshold=False
-        )
+        f, _, _, _ = self.encode(x, return_topk=True, use_threshold=False)
         x_hat = self.decode(f)
         e = x - x_hat
         l2_loss = e.pow(2).sum(dim=-1).mean()
         return l2_loss
-    
+
     def get_auxiliary_loss(
         self, residual_BD: torch.Tensor, post_relu_acts_BF: torch.Tensor
     ):
@@ -550,7 +553,9 @@ class TopKSAE(Dictionary, torch.nn.Module):
             return torch.tensor(0, dtype=residual_BD.dtype, device=residual_BD.device)
 
     @torch.no_grad()
-    def geometric_median(self, points: torch.Tensor, max_iter: int = 100, tol: float = 1e-5):
+    def geometric_median(
+        self, points: torch.Tensor, max_iter: int = 100, tol: float = 1e-5
+    ):
         """Compute the geometric median `points`. Used for initializing decoder bias."""
         # Initialize our guess as the mean of the points
         guess = points.mean(dim=0)
@@ -598,7 +603,9 @@ class TopKSAE(Dictionary, torch.nn.Module):
             # Fallback to regular torch.save if safetensors not available
             torch.save(
                 self.state_dict(),
-                os.path.join(self.save_dir, "checkpoints", f"SAE_checkpoint_step_{step}.pt"),
+                os.path.join(
+                    self.save_dir, "checkpoints", f"SAE_checkpoint_step_{step}.pt"
+                ),
             )
             logger.warning("safetensors not available, falling back to torch.save")
             logger.info(f"Saved checkpoint at step {step}")
@@ -610,8 +617,7 @@ class TopKSAE(Dictionary, torch.nn.Module):
 
 class AbsoluteKSAE(Dictionary, torch.nn.Module):
     """
-    The top-k autoencoder architecture and initialization used in https://arxiv.org/abs/2406.04093
-    NOTE: (From Adam Karvonen) There is an unmaintained implementation using Triton kernels in the topk-triton-implementation branch.
+    AbsoluteKSAE is a dictionary that uses the absolute value of the activations to determine the top-k features.
     """
 
     def __init__(self, activation_dim: int, dict_size: int, k: int):
@@ -619,9 +625,13 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
         self.activation_dim = activation_dim
         self.dict_size = dict_size
 
-        assert isinstance(k, int) and k > 0, f"k={k} must be a positive integer"
+        if k <= 0:
+            raise ValueError(f"k={k} must be a positive integer")
 
         self.register_buffer("k_buffer", torch.tensor(k, dtype=torch.int))
+
+        # Initialize MSE loss function
+        self.mse_loss = torch.nn.MSELoss(reduction="mean")
 
         # decoder shape: (activation_dim, dict_size)
         self.decoder = torch.nn.Linear(dict_size, activation_dim, bias=False)
@@ -634,6 +644,7 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
         self.encoder.bias.data.zero_()
 
         self.b_dec = torch.nn.Parameter(torch.zeros(activation_dim))
+        self.topk_loss = TopKSAELoss()
 
     @property
     def k(self):
@@ -659,29 +670,22 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
         else:
             return x_hat_BD, encoded_acts_BF
 
-    def encode(
-        self, x: torch.Tensor, return_topk: bool = False, use_threshold: bool = False
-    ):
+    def encode(self, x: torch.Tensor, return_topk: bool = False):
         pre_activation_BF = self.encoder(x - self.b_dec)
 
         absoluteK_acts_BF = pre_activation_BF.abs()
         post_topk = absoluteK_acts_BF.topk(self.k, sorted=False, dim=-1)
 
+        # create mask from pre_activation for gradient connection
         top_indices_BK = post_topk.indices
-        tops_acts_BK = pre_activation_BF.gather(dim=-1, index=top_indices_BK)
+        top_values_BK = post_topk.values
+        mask = torch.zeros_like(pre_activation_BF)
+        mask.scatter_(-1, top_indices_BK, 1.0)
 
-        buffer_BF = torch.zeros_like(pre_activation_BF)
-        encoded_acts_BF = buffer_BF.scatter_(
-            dim=-1, index=top_indices_BK, src=tops_acts_BK
-        )
+        encoded_acts_BF = pre_activation_BF * mask
 
         if return_topk:
-            return (
-                encoded_acts_BF,
-                tops_acts_BK,
-                top_indices_BK,
-                pre_activation_BF,
-            )  # Return pre-ReLU
+            return (encoded_acts_BF, top_values_BK, top_indices_BK, pre_activation_BF)
         else:
             return encoded_acts_BF
 
@@ -709,7 +713,7 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
         save_dir: str,
         save_steps: list[int],
         steps: int,
-        device: str,
+        device: str = "cuda",
         lr: Optional[float] = 1e-4,
         auxk_alpha: float = 1 / 32,  # see Appendix A.2
         decay_start: Optional[int] = None,  # when does the lr decay start
@@ -718,13 +722,35 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
         normalize_activations: bool = True,
         k_anneal_steps: Optional[int] = None,
         name: str = "SAE",
+        torch_dtype: torch.dtype = torch.bfloat16,
     ):
+        """
+        Train the AbsoluteKSAE.
 
+        Args:
+            data (torch.Tensor): Data to train the SAE on.
+            warmup_steps (int): Number of steps to warmup the SAE.
+            save_dir (str): Directory to save the SAE.
+            sparsity_warmup_steps (int): Number of steps to warmup the sparsity.
+            save_dir (str): Directory to save the SAE.
+            save_steps (list[int]): Steps to save the SAE.
+            steps (int): Total number of steps to train the SAE.
+            device (str): Device to train the SAE on.
+            lr (Optional[float], optional): Learning rate. Defaults to 1e-4.
+            auxk_alpha (float, optional): Auxiliary k alpha. Defaults to 1/32.
+            threshold_start_step (int, optional): Step to start the threshold. Defaults to 1000.
+            normalize_activations (bool, optional): Whether to normalize the activations. Defaults to True.
+            k_anneal_steps (Optional[int], optional): Steps to anneal the k. Defaults to None.
+            name (str, optional): Name of the SAE. Defaults to "SAE".
+            torch_dtype (torch.dtype, optional): Torch dtype to train the SAE on. Defaults to torch.bfloat16.
+        """
         # setup
+        os.makedirs(save_dir, exist_ok=True)
+
         autocast_context = (
             nullcontext()
             if device == "cpu"
-            else torch.autocast(device_type=device, dtype=torch.bfloat16)
+            else torch.autocast(device_type=device, dtype=torch_dtype)
         )
         self.top_k_aux = self.activation_dim // 2  # Heuristic from of topk paper
         self.num_tokens_since_fired = torch.zeros(
@@ -732,7 +758,7 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
         )
         # Optimize all parameters: decoder weights, encoder weights, encoder bias, and decoder bias
         optimizer = torch.optim.Adam(self.parameters(), lr=lr, betas=(0.9, 0.999))
-        
+
         lr_fn = get_lr_schedule(steps, warmup_steps, decay_start=decay_start)
 
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_fn)
@@ -747,33 +773,28 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
         self.auxk_alpha = auxk_alpha
         if normalize_activations:
             norm_factor = get_norm_factor(data, steps=100)
-            self.scale_biases(1.0)
+            # self.scale_biases(1.0)
 
         with mlflow.start_run(run_name=f"SAE_{name}"):
             mlflow.log_params(self.config)
 
             with autocast_context:
                 for step, act in enumerate(tqdm(data, total=steps)):
+                    if step > steps:
+                        break
                     act = act.to(dtype=torch.bfloat16)
                     if normalize_activations:
                         act = act / norm_factor
 
-                    if step > steps:
-                        break
-                    # TODO: for epoch?
-
                     # training
-                    step_losses = self.update_step(step, act, device, optimizer, scheduler)
+                    step_losses = self.update_step(
+                        step, act, device, optimizer, scheduler
+                    )
 
                     if save_steps and step in save_steps:
                         self.save_checkpoint(step)
 
                     mlflow.log_metric("loss", step_losses, step=step)
-                    mlflow.log_metric("effective_l0", self.effective_l0, step=step)
-                    mlflow.log_metric("dead_features", self.dead_features, step=step)
-                    mlflow.log_metric(
-                        "pre_norm_auxk_loss", self.pre_norm_auxk_loss, step=step
-                    )
 
                 mlflow.end_run()
                 logger.info(f"Training complete. Final loss: {step_losses}")
@@ -794,7 +815,14 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
                     )
                     logger.info(f"Saved final SAE to {save_dir}")
 
-    def update_step(self, step: int, act: torch.Tensor, device: str, optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler.LambdaLR) -> float:
+    def update_step(
+        self,
+        step: int,
+        act: torch.Tensor,
+        device: str,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.LambdaLR,
+    ) -> float:
         """
         Update the step and return the losses.
         """
@@ -804,9 +832,17 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
             self.b_dec.data = median
 
         act = act.to(device)
-        loss = self.loss(act, step=step)
-        loss.backward()
+        loss = self.topk_loss(act, self)
 
+        loss.backward()
+        total_norm = 0
+        for p in self.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.detach().data.norm(2)
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+
+        mlflow.log_metric("grad_norm", total_norm, step=step)
         # clip grad norm and remove grads parallel to decoder directions
         self.decoder.weight.grad = remove_gradient_parallel_to_decoder_directions(
             self.decoder.weight,
@@ -829,94 +865,10 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
 
         return loss.item()
 
-    def loss(self, x: torch.Tensor, step: int = 0):
-        # Run the SAE
-        f, top_acts_BK, top_indices_BK, post_relu_acts_BF = self.encode(
-            x, return_topk=True, use_threshold=False
-        )
-
-        x_hat = self.decode(f)
-        # Measure goodness of reconstruction
-        e = x - x_hat
-        l2_loss = e.pow(2).sum(dim=-1).mean()
-
-        loss = l2_loss
-
-        return loss
-
-    def update_threshold(self, top_acts_BK: torch.Tensor):
-        """update the threshold for the SAE
-
-        Args:
-            top_acts_BK (t.Tensor): top activations
-        """
-        device_type = "cuda" if top_acts_BK.is_cuda else "cpu"
-        with torch.autocast(device_type=device_type, enabled=False), torch.no_grad():
-            active = top_acts_BK.clone().detach()
-            active[active <= 0] = float("inf")
-            min_activations = active.min(dim=1).values.to(dtype=torch.float32)
-            min_activation = min_activations.mean()
-
-            B, K = active.shape
-            assert len(active.shape) == 2
-            assert min_activations.shape == (B,)
-
-            if self.threshold < 0:
-                self.threshold = min_activation
-            else:
-                self.threshold = (self.threshold_beta * self.threshold) + (
-                    (1 - self.threshold_beta) * min_activation
-                )
-
-    def get_auxiliary_loss(
-        self, residual_BD: torch.Tensor, post_relu_acts_BF: torch.Tensor
-    ):
-        dead_features = self.num_tokens_since_fired >= self.dead_feature_threshold
-        self.dead_features = int(dead_features.sum())
-
-        if self.dead_features > 0:
-            k_aux = min(self.top_k_aux, self.dead_features)
-
-            auxk_latents = torch.where(
-                dead_features[None], post_relu_acts_BF, -torch.inf
-            )
-
-            # Top-k dead latents
-            auxk_acts, auxk_indices = auxk_latents.abs().topk(k_aux, sorted=False)
-            auxk_acts = auxk_latents.gather(dim=-1, index=auxk_indices)
-
-            auxk_buffer_BF = torch.zeros_like(post_relu_acts_BF)
-            auxk_acts_BF = auxk_buffer_BF.scatter_(
-                dim=-1, index=auxk_indices, src=auxk_acts
-            )
-
-            # Note: decoder(), not decode(), as we don't want to apply the bias
-            x_reconstruct_aux = self.decoder(auxk_acts_BF)
-            l2_loss_aux = (
-                (residual_BD.float() - x_reconstruct_aux.float())
-                .pow(2)
-                .sum(dim=-1)
-                .mean()
-            )
-
-            self.pre_norm_auxk_loss = l2_loss_aux
-
-            # normalization from OpenAI implementation
-            residual_mu = residual_BD.mean(dim=0)[None, :].broadcast_to(
-                residual_BD.shape
-            )
-            loss_denom = (
-                (residual_BD.float() - residual_mu.float()).pow(2).sum(dim=-1).mean()
-            )
-            normalized_auxk_loss = l2_loss_aux / loss_denom
-
-            return normalized_auxk_loss.nan_to_num(0.0)
-        else:
-            self.pre_norm_auxk_loss = -1
-            return torch.tensor(0, dtype=residual_BD.dtype, device=residual_BD.device)
-
     @torch.no_grad()
-    def geometric_median(self, points: torch.Tensor, max_iter: int = 100, tol: float = 1e-5):
+    def geometric_median(
+        self, points: torch.Tensor, max_iter: int = 100, tol: float = 1e-5
+    ):
         """Compute the geometric median `points`. Used for initializing decoder bias."""
         # Initialize our guess as the mean of the points
         guess = points.mean(dim=0)
@@ -971,13 +923,69 @@ class AbsoluteKSAE(Dictionary, torch.nn.Module):
         self.b_dec.data *= scale
 
     def test(self, x: torch.Tensor):
-        f, _, _, _ = self.encode(
-            x, return_topk=True, use_threshold=False
-        )
+        f, _, _, _ = self.encode(x, return_topk=True, use_threshold=False)
         x_hat = self.decode(f)
-        
+
         e = x - x_hat
-        
+
         l2_loss = e.pow(2).sum(dim=-1).mean()
-        
+
         return l2_loss
+
+    def mse_sparsity_tradeoff(
+        self,
+        x: torch.Tensor,
+        steps: int = 10,
+        from_pretrained: bool = False,
+        save_dir: str = None,
+    ):
+        """
+        Compute the MSE vs Sparsity tradeoff.
+        """
+        if from_pretrained:
+            self.from_pretrained(
+                os.path.join(save_dir, "SAE_final.safetensors"), device="cuda"
+            )
+            save_dir = save_dir
+        else:
+            save_dir = self.save_dir
+
+        mse_loss_list = []
+        k_list = []
+        for k in tqdm(range(1, 1000, 50)):
+            with torch.no_grad():
+                mse_loss = 0
+                for step, act in enumerate(x):
+                    if step > steps:
+                        break
+                    self.k = k
+                    f = self.encode(act)
+                    x_hat = self.decode(f)
+                    mse_loss += self.mse_loss(x_hat, act)
+                avg_mse_loss = mse_loss / steps
+                mse_loss_list.append(avg_mse_loss.item())
+                k_list.append(k)
+        save_path = os.path.join(save_dir, "mse_sparsity_tradeoff.txt")
+        with open(save_path, "w") as f:
+            for k, mse_loss in zip(k_list, mse_loss_list):
+                f.write(f"{k} {mse_loss}\n")
+        plt.plot(k_list, mse_loss_list)
+        plt.xlabel("k")
+        plt.ylabel("MSE loss")
+        plt.title("MSE vs Sparsity Trade-off")
+        plt.legend()
+        plt.savefig(os.path.join(save_dir, "mse_sparsity_tradeoff.pdf"))
+        plt.close()
+        return mse_loss_list, k_list
+
+
+class TopKSAELoss(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse_loss = torch.nn.MSELoss(reduction="mean")
+
+    def forward(self, x: torch.Tensor, sae: torch.nn.Module):
+        f = sae.encode(x)
+        x_hat = sae.decode(f)
+        mse_loss = self.mse_loss(x_hat, x)
+        return mse_loss
