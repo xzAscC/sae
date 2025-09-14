@@ -36,7 +36,7 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--model_name",
         type=str,
-        default="EleutherAI/pythia-70m",
+        default="google/gemma-2-2b",
         help="LLM model name",
         choices=[
             "EleutherAI/pythia-70m",
@@ -45,7 +45,7 @@ def config() -> argparse.Namespace:
             "openai-community/gpt2",
         ],
     )
-    parser.add_argument("--model_layer", type=int, default=3, help="LLM model layer")
+    parser.add_argument("--model_layer", type=int, default=12, help="LLM model layer")
     parser.add_argument(
         "--dataset",
         type=str,
@@ -71,12 +71,12 @@ def config() -> argparse.Namespace:
         "--dictionary_factor", type=int, default=8, help="Dictionary factor"
     )
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
-    parser.add_argument("--n_ctxs", type=int, default=1000, help="Number of contexts")
-    parser.add_argument("--ctx_len", type=int, default=1024, help="Context length")
+    parser.add_argument("--n_ctxs", type=int, default=10, help="Number of contexts")
+    parser.add_argument("--ctx_len", type=int, default=128, help="Context length")
 
     parser.add_argument("--steps", type=int, default=20000, help="Number of steps")
     parser.add_argument("--save_ratio", type=float, default=0.1, help="save ratio")
-    parser.add_argument("--k", type=int, default=50, help="Number of top-k features")
+    parser.add_argument("--k", type=int, default=230, help="Number of top-k features")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
     parser.add_argument("--auxk_alpha", type=float, default=1 / 32, help="Auxiliary k")
     parser.add_argument("--decay_start", type=int, default=None, help="Decay start")
