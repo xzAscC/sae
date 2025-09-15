@@ -34,7 +34,7 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         type=str,
-        default="Skylion007/openwebtext",
+        default="monology/pile-uncopyrighted",
         choices=["Skylion007/openwebtext", "monology/pile-uncopyrighted"],
     )
     parser.add_argument("--log_path", type=str, default="./logs/")
@@ -47,23 +47,20 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--sae_name",
         type=str,
-        default="topk",
+        default="batchabsolutek",
         choices=["topk", "absolutek", "batchabsolutek", "batchtopk"],
     )
-    parser.add_argument("--layer", type=int, default=8)
+    parser.add_argument("--layer", type=int, default=6)
     parser.add_argument("--torch_dtype", type=str, default="bfloat16")
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--aux_penalty", type=float, default=1 / 32)
-    parser.add_argument("--k", type=int, default=230)
+    parser.add_argument("--k", type=int, default=76)
     parser.add_argument("--lr", type=int, default=3e-4)
     parser.add_argument("--steps", type=int, default=10000)
     parser.add_argument("--input_unit_norm", type=bool, default=True)
     parser.add_argument("--dictionary_factor", type=int, default=16)
     parser.add_argument("--bandwidth", type=float, default=0.001)
-    parser.add_argument("--l1_coeff", type=float, default=0)
-    parser.add_argument(
-        "--save_steps", type=float, default=0.004, choices=[0.004, 0.0018, 0.0008]
-    )
+    parser.add_argument("--l1_coeff", type=float, default=0.004)
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--num_batches_in_buffer", type=int, default=10)
     parser.add_argument("--num_tokens", type=int, default=int(1e9))
@@ -100,11 +97,11 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--model_name",
         type=str,
-        default="EleutherAI/pythia-70m",
+        default="Qwen/Qwen3-4B",
         choices=[
             "EleutherAI/pythia-70m",
             "google/gemma-2-2b",
-            "Qwen/Qwen3-4B-Thinking-2507",
+            "Qwen/Qwen3-4B",
             "openai-community/gpt2",
         ],
     )
@@ -116,12 +113,24 @@ def config() -> argparse.Namespace:
 
 def post_init_cfg(args: argparse.Namespace) -> dict:
     cfg = vars(args)
-    site = "resid_pre"
-    cfg["hook_point"] = transformer_lens.utils.get_act_name(site, cfg["layer"])
+    if cfg["model_name"] == "openai-community/gpt2":
+        cfg["hook_point"] = f"blocks.{cfg['layer']}.hook_resid_post"
+        cfg["model_name"] = "gpt2"
+    elif cfg["model_name"] == "Qwen/Qwen3-4B":
+        cfg["hook_point"] = f"blocks.{cfg['layer']}.hook_resid_post"
+    elif cfg["model_name"] == "google/gemma-2-2b":
+        cfg["hook_point"] = f"blocks.{cfg['layer']}.hook_resid_post"
+    elif cfg["model_name"] == "EleutherAI/pythia-70m":
+        cfg["hook_point"] = f"blocks.{cfg['layer']}.hook_resid_post"
+    else:
+        raise ValueError(f"Invalid model name: {cfg['model_name']}")
+
+    # Generate hook point name
     cfg["name"] = (
-        f"{cfg['model_name']}_{cfg['hook_point']}_{cfg['dictionary_factor']}_{cfg['sae_name']}_{cfg['k']}_{cfg['lr']}"
+        f"{cfg['model_name'].split('/')[-1]}_{cfg['dataset'].split('/')[-1]}_{cfg['hook_point']}_{cfg['dictionary_factor']}_{cfg['sae_name']}_{cfg['k']}_{cfg['lr']}"
     )
     logger.info(f"Post-initializing configuration: {cfg}")
+    logger.info(f"Generated hook point: {cfg['hook_point']}")
 
     return cfg
 
@@ -170,18 +179,6 @@ def SAETrainer() -> None:
 
     # Step 2: Model setup
     torch_dtype = getattr(torch, args.torch_dtype)
-
-    if args.sae_name == "topk":
-        sae = TopKSAE(args)
-    elif args.sae_name == "absolutek":
-        sae = AbsoluteKSAE(args)
-    elif args.sae_name == "batchabsolutek":
-        sae = BatchAbsoluteKSAE(args)
-    elif args.sae_name == "batchtopk":
-        sae = BatchTopKSAE(args)
-    else:
-        raise ValueError(f"Invalid SAE name: {args.sae_name}")
-
     cfg = post_init_cfg(args)
 
     model = (
@@ -189,10 +186,24 @@ def SAETrainer() -> None:
         .to(torch_dtype)
         .to(cfg["device"])
     )
+
     cfg["act_size"] = model.cfg.d_model
     cfg["dict_size"] = cfg["dictionary_factor"] * cfg["act_size"]
-    cfg["torch_dtype"] = torch_dtype
+    cfg["dtype"] = torch_dtype
     activations_store = ActivationsStore(model, cfg)
+
+    if args.sae_name == "topk":
+        sae = TopKSAE(cfg)
+    elif args.sae_name == "absolutek":
+        sae = AbsoluteKSAE(cfg)
+    elif args.sae_name == "batchabsolutek":
+        sae = BatchAbsoluteKSAE(cfg)
+    elif args.sae_name == "batchtopk":
+        sae = BatchTopKSAE(cfg)
+    else:
+        raise ValueError(f"Invalid SAE name: {args.sae_name}")
+
+    # Step 3: Training
     train_sae(sae, activations_store, model, cfg)
 
     notify_gmail(
@@ -221,7 +232,19 @@ def train_sae(
     for idx in pbar:
         batch = activations_store.next_batch()
         sae_output = sae(batch)
-        mlflow.log_metrics(sae_output, step=idx)
+        mlflow.log_metrics(
+            {
+                "loss": sae_output["loss"].item(),
+                "l0_norm": sae_output["l0_norm"].item(),
+                "l2_loss": sae_output["l2_loss"].item(),
+                "l1_loss": sae_output["l1_loss"].item(),
+                "l1_norm": sae_output["l1_norm"].item(),
+                "num_dead_features": sae_output["num_dead_features"].item(),
+                "positive_features": sae_output["positive_features"].item(),
+                "negative_features": sae_output["negative_features"].item(),
+            },
+            step=idx,
+        )
         if idx % cfg["perf_log_freq"] == 0:
             log_model_performance(idx, model, activations_store, sae)
         if idx % cfg["checkpoint_freq"] == 0:
@@ -354,18 +377,8 @@ def save_checkpoint(sae: BaseAutoencoder, cfg: dict, idx: int) -> None:
     with open(config_path, "w") as f:
         json.dump(json_safe_cfg, f, indent=4)
     logger.info(f"Config saved as {config_path}")
-    # Create and log artifact
-    artifact = mlflow.Artifact(
-        name=f"{cfg['name']}_{idx}",
-        type="model",
-        description=f"Model checkpoint at step {idx}",
-    )
-    artifact.add_file(sae_path)
-    artifact.add_file(config_path)
-    mlflow.log_artifact(artifact)
-
-    logger.info(f"Model and config saved as artifact at step {idx}")
     return None
+
 
 def notify_gmail(message: str, subject: str = "SAE Training Notification") -> None:
     """

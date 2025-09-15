@@ -1,6 +1,7 @@
 import torch
 import transformer_lens
 import datasets
+from loguru import logger
 
 class ActivationsStore:
     def __init__(

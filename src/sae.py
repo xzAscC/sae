@@ -180,6 +180,8 @@ class BatchAbsoluteKSAE(BaseAutoencoder):
             "l0_norm": l0_norm,
             "l1_norm": l1_norm,
             "aux_loss": aux_loss,
+            "positive_features": (acts_topk > 0).float().sum(-1).mean(),
+            "negative_features": (acts_topk < 0).float().sum(-1).mean(),
         }
         return output
 
@@ -298,9 +300,11 @@ class BatchTopKSAE(BaseAutoencoder):
             return torch.tensor(0, dtype=x.dtype, device=x.device)
 
 
-class TopKSAE:
-    pass
+class TopKSAE(BaseAutoencoder):
+    def __init__(self, cfg):
+        super().__init__(cfg)
 
 
-class AbsoluteKSAE:
-    pass
+class AbsoluteKSAE(BaseAutoencoder):
+    def __init__(self, cfg):
+        super().__init__(cfg)
