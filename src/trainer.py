@@ -2,15 +2,18 @@ import argparse
 import os
 import yaml
 import torch
-import nnsight
+import tqdm
 import apprise
-from datetime import datetime
+import transformer_lens
+import mlflow
+import safetensors
+import json
 from loguru import logger
 from dotenv import load_dotenv
-
 from utils import seed_setup
-from data import ActivationBuffer, load_dataset
-from sae import TopKSAE, AbsoluteKSAE
+from data import ActivationsStore
+from sae import TopKSAE, BatchTopKSAE, BaseAutoencoder, BatchAbsoluteKSAE, AbsoluteKSAE
+from functools import partial
 
 load_dotenv()
 
@@ -26,18 +29,78 @@ def config() -> argparse.Namespace:
         args: argparse.Namespace
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, default="cuda")
+
+    # basic information
     parser.add_argument(
-        "--config_save_path",
+        "--dataset",
         type=str,
-        default="./configs/",
-        help="Path to save the configuration",
+        default="Skylion007/openwebtext",
+        choices=["Skylion007/openwebtext", "monology/pile-uncopyrighted"],
     )
+    parser.add_argument("--log_path", type=str, default="./logs/")
+    parser.add_argument("--config_save_path", type=str, default="./configs/")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--verbose", type=bool, default=True)
+
+    # SAE specific
+    parser.add_argument(
+        "--sae_name",
+        type=str,
+        default="topk",
+        choices=["topk", "absolutek", "batchabsolutek", "batchtopk"],
+    )
+    parser.add_argument("--layer", type=int, default=8)
+    parser.add_argument("--torch_dtype", type=str, default="bfloat16")
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--aux_penalty", type=float, default=1 / 32)
+    parser.add_argument("--k", type=int, default=230)
+    parser.add_argument("--lr", type=int, default=3e-4)
+    parser.add_argument("--steps", type=int, default=10000)
+    parser.add_argument("--input_unit_norm", type=bool, default=True)
+    parser.add_argument("--dictionary_factor", type=int, default=16)
+    parser.add_argument("--bandwidth", type=float, default=0.001)
+    parser.add_argument("--l1_coeff", type=float, default=0)
+    parser.add_argument(
+        "--save_steps", type=float, default=0.004, choices=[0.004, 0.0018, 0.0008]
+    )
+    parser.add_argument("--seq_len", type=int, default=128)
+    parser.add_argument("--num_batches_in_buffer", type=int, default=10)
+    parser.add_argument("--num_tokens", type=int, default=int(1e9))
+    parser.add_argument("--checkpoint_freq", type=int, default=10000)
+    parser.add_argument(
+        "--n_batches_to_dead",
+        type=int,
+        default=5,
+        help="Number of batches to consider a feature dead",
+    )
+    parser.add_argument(
+        "--top_k_aux",
+        type=int,
+        default=512,
+        help="Number of top k activations to use for auxiliary loss",
+    )
+    parser.add_argument(
+        "--perf_log_freq",
+        type=int,
+        default=1000,
+        help="Frequency of performance logging",
+    )
+
+    ## Optimizer specific
+    parser.add_argument(
+        "--beta1", type=float, default=0.9, help="Beta1 for Adam optimizer"
+    )
+    parser.add_argument(
+        "--beta2", type=float, default=0.99, help="Beta2 for Adam optimizer"
+    )
+    parser.add_argument("--max_grad_norm", type=float, default=100000)
+
+    # model specific
     parser.add_argument(
         "--model_name",
         type=str,
-        default="google/gemma-2-2b",
-        help="LLM model name",
+        default="EleutherAI/pythia-70m",
         choices=[
             "EleutherAI/pythia-70m",
             "google/gemma-2-2b",
@@ -45,63 +108,22 @@ def config() -> argparse.Namespace:
             "openai-community/gpt2",
         ],
     )
-    parser.add_argument("--model_layer", type=int, default=12, help="LLM model layer")
-    parser.add_argument(
-        "--dataset",
-        type=str,
-        default="monology/pile-uncopyrighted",
-        help="Dataset name",
-        choices=["pyvene/axbench-concept16k_v2", "monology/pile-uncopyrighted", "Salesforce/wikitext"],
-    )
-    parser.add_argument(
-        "--sae_name",
-        type=str,
-        default="absolutek",
-        help="SAE name",
-        choices=["topk", "absolutek"],
-    )
-    parser.add_argument("--verbose", type=bool, default=True, help="Verbose mode")
-    parser.add_argument(
-        "--seed", type=int, default=42, help="Seed for random number generator"
-    )
-    parser.add_argument(
-        "--log_path", type=str, default="./logs/", help="Path to save the logs"
-    )
-    parser.add_argument(
-        "--dictionary_factor", type=int, default=8, help="Dictionary factor"
-    )
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
-    parser.add_argument("--n_ctxs", type=int, default=10, help="Number of contexts")
-    parser.add_argument("--ctx_len", type=int, default=128, help="Context length")
-
-    parser.add_argument("--steps", type=int, default=20000, help="Number of steps")
-    parser.add_argument("--save_ratio", type=float, default=0.1, help="save ratio")
-    parser.add_argument("--k", type=int, default=230, help="Number of top-k features")
-    parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
-    parser.add_argument("--auxk_alpha", type=float, default=1 / 32, help="Auxiliary k")
-    parser.add_argument("--decay_start", type=int, default=None, help="Decay start")
-    parser.add_argument(
-        "--torch_dtype", type=str, default="bfloat16", help="Torch dtype"
-    )
-    parser.add_argument(
-        "--threshold_beta", type=float, default=0.999, help="Threshold beta"
-    )
-    parser.add_argument(
-        "--threshold_start_step", type=int, default=1000, help="Threshold start step"
-    )
-    parser.add_argument(
-        "--remove_bos", type=bool, default=False, help="Remove BOS token"
-    )
-    parser.add_argument(
-        "--add_special_token", type=bool, default=True, help="Add special token"
-    )
-    parser.add_argument(    
-        "--normalize_activations", type=bool, default=False, help="Normalize activations"
-    )
 
     args = parser.parse_args()
 
     return args
+
+
+def post_init_cfg(args: argparse.Namespace) -> dict:
+    cfg = vars(args)
+    site = "resid_pre"
+    cfg["hook_point"] = transformer_lens.utils.get_act_name(site, cfg["layer"])
+    cfg["name"] = (
+        f"{cfg['model_name']}_{cfg['hook_point']}_{cfg['dictionary_factor']}_{cfg['sae_name']}_{cfg['k']}_{cfg['lr']}"
+    )
+    logger.info(f"Post-initializing configuration: {cfg}")
+
+    return cfg
 
 
 def save_args(args: argparse.Namespace) -> None:
@@ -127,7 +149,7 @@ def save_args(args: argparse.Namespace) -> None:
     return model_name, dataset_name
 
 
-def train_sae() -> None:
+def SAETrainer() -> None:
     # Step 1: Config and logger setup
     args = config()
     model_name, dataset_name = save_args(args)
@@ -148,143 +170,202 @@ def train_sae() -> None:
 
     # Step 2: Model setup
     torch_dtype = getattr(torch, args.torch_dtype)
-    if args.model_name == "EleutherAI/pythia-70m":
-        model = nnsight.LanguageModel(
-            args.model_name, device_map=device, torch_dtype=torch_dtype
-        )
-        model_layer_name = "gpt_neox"
-        activation_dim = getattr(model, model_layer_name).embed_in.weight.shape[1]
-
-    elif args.model_name == "google/gemma-2-2b":
-        model = nnsight.LanguageModel(
-            args.model_name, device_map=device, torch_dtype=torch_dtype
-        )
-        model_layer_name = "model"
-        activation_dim = getattr(model, model_layer_name).embed_tokens.weight.shape[1]
-
-    elif args.model_name == "Qwen/Qwen3-4B-Thinking-2507":
-        model = nnsight.LanguageModel(
-            args.model_name, device_map=device, torch_dtype=torch_dtype
-        )
-        model_layer_name = "model"
-        activation_dim = getattr(model, model_layer_name).embed_tokens.weight.shape[1]
-        dictionary_dim = args.dictionary_factor * activation_dim
-
-    elif args.model_name == "openai-community/gpt2":
-        model = nnsight.LanguageModel(
-            args.model_name, device_map=device, torch_dtype=torch_dtype
-        )
-        model_layer_name = "transformer"
-        activation_dim = getattr(model, model_layer_name).wte.weight.shape[1]
-
-    else:
-        raise ValueError(f"Model {args.model_name} not supported")
-
-    dictionary_dim = args.dictionary_factor * activation_dim
-    (
-        logger.info(
-            f"Activation dim: {activation_dim}, Dictionary dim: {dictionary_dim}"
-        )
-        if args.verbose
-        else None
-    )
-    logger.info(f"Model layer name: {model_layer_name}") if args.verbose else None
-
-    # Step 3: Data setup
-    try:
-        data = load_dataset(args.dataset)
-    except Exception as e:
-        logger.error(f"Error loading dataset: {e}")
-
-    buffer = ActivationBuffer(
-        data=data,
-        model=model,
-        model_layer_name=model_layer_name,
-        model_layer=args.model_layer,
-        d_submodule=activation_dim,
-        n_ctxs=args.n_ctxs,
-        ctx_len=args.ctx_len,
-        device=device,
-        batch_size=args.batch_size,
-        remove_bos=args.remove_bos,
-        add_special_token=args.add_special_token,
-    )
-
-    # Step 4: SAE setup
-    warmup_steps = max(1, min(1000, args.steps // 10, args.steps - 1))
-    # Ensure sparsity_warmup_steps is at least warmup_steps and less than total steps
-    sparsity_warmup_steps = max(
-        warmup_steps, min(2000, args.steps // 5, args.steps - 1)
-    )
-
-    # Create a timestamped save directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = os.path.join(
-        args.log_path,
-        f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name}_{timestamp}",
-    )
-
-    logger.info(f"Saving SAE to: {save_dir}") if args.verbose else None
-
-    # Calculate save steps for intermediate checkpoints (every 10% of total steps)
-    save_steps = list(range(0, args.steps, int(args.save_ratio * args.steps)))
-    if args.steps - 1 not in save_steps:
-        save_steps.append(args.steps - 1)
 
     if args.sae_name == "topk":
-        sae = TopKSAE(
-            activation_dim=activation_dim,
-            dict_size=dictionary_dim,
-            k=args.k,
-        )
-        sae.to(device)
-        sae.train(
-            data=buffer,
-            warmup_steps=warmup_steps,
-            sparsity_warmup_steps=sparsity_warmup_steps,
-            save_dir=save_dir,
-            save_steps=save_steps,
-            steps=args.steps,
-            device=args.device,
-            lr=args.lr,
-            auxk_alpha=args.auxk_alpha,
-            decay_start=args.decay_start,
-            threshold_beta=args.threshold_beta,
-            threshold_start_step=args.threshold_start_step,
-            name=f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name}_{timestamp}",
-        )
+        sae = TopKSAE(args)
     elif args.sae_name == "absolutek":
-        sae = AbsoluteKSAE(
-            activation_dim=activation_dim,
-            dict_size=dictionary_dim,
-            k=args.k,
-        )
-        sae.to(device)
-        sae.train(
-            data=buffer,
-            warmup_steps=warmup_steps,
-            sparsity_warmup_steps=sparsity_warmup_steps,
-            save_dir=save_dir,
-            save_steps=save_steps,
-            steps=args.steps,
-            device=args.device,
-            lr=args.lr,
-            auxk_alpha=args.auxk_alpha,
-            normalize_activations=args.normalize_activations,
-            torch_dtype=torch_dtype,
-            decay_start=args.decay_start,
-            name=f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name}_{timestamp}",
-        )
-        sae.mse_sparsity_tradeoff(x=buffer, steps=args.steps)
+        sae = AbsoluteKSAE(args)
+    elif args.sae_name == "batchabsolutek":
+        sae = BatchAbsoluteKSAE(args)
+    elif args.sae_name == "batchtopk":
+        sae = BatchTopKSAE(args)
     else:
-        raise ValueError(f"SAE {args.sae_name} not supported")
+        raise ValueError(f"Invalid SAE name: {args.sae_name}")
+
+    cfg = post_init_cfg(args)
+
+    model = (
+        transformer_lens.HookedTransformer.from_pretrained(cfg["model_name"])
+        .to(torch_dtype)
+        .to(cfg["device"])
+    )
+    cfg["act_size"] = model.cfg.d_model
+    cfg["dict_size"] = cfg["dictionary_factor"] * cfg["act_size"]
+    cfg["torch_dtype"] = torch_dtype
+    activations_store = ActivationsStore(model, cfg)
+    train_sae(sae, activations_store, model, cfg)
 
     notify_gmail(
-        message=f"SAE{args.sae_name}_{model_name}_Layer{args.model_layer}_{dataset_name} training completed",
-        subject=f"SAE Training Completed - {model_name} Layer {args.model_layer} {args.sae_name} SAE {args.dataset}",
+        message=f"SAE{args.sae_name}_{model_name}_Layer{args.layer}_{args.dataset} training completed",
+        subject=f"SAE Training Completed - {model_name} Layer {args.layer} {args.sae_name} SAE {args.dataset}",
     )
     return None
 
+
+def train_sae(
+    sae: BaseAutoencoder,
+    activations_store: ActivationsStore,
+    model: transformer_lens.HookedTransformer,
+    cfg: dict,
+) -> None:
+    num_batches = cfg["num_tokens"] // cfg["batch_size"]
+    optimizer = torch.optim.Adam(
+        sae.parameters(), lr=cfg["lr"], betas=(cfg["beta1"], cfg["beta2"])
+    )
+    pbar = tqdm.trange(num_batches)
+
+    mlflow.set_experiment(cfg["name"])
+    mlflow.pytorch.autolog()
+    mlflow.log_params(cfg)
+
+    for idx in pbar:
+        batch = activations_store.next_batch()
+        sae_output = sae(batch)
+        mlflow.log_metrics(sae_output, step=idx)
+        if idx % cfg["perf_log_freq"] == 0:
+            log_model_performance(idx, model, activations_store, sae)
+        if idx % cfg["checkpoint_freq"] == 0:
+            save_checkpoint(sae, cfg, idx)
+
+        loss = sae_output["loss"]
+        pbar.set_postfix(
+            {
+                "Loss": f"{loss.item():.4f}",
+                "L0": f"{sae_output['l0_norm']:.4f}",
+                "L2": f"{sae_output['l2_loss']:.4f}",
+                "L1": f"{sae_output['l1_loss']:.4f}",
+                "L1_norm": f"{sae_output['l1_norm']:.4f}",
+            }
+        )
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(sae.parameters(), cfg["max_grad_norm"])
+        sae.make_decoder_weights_and_grad_unit_norm()
+        optimizer.step()
+        optimizer.zero_grad()
+
+    save_checkpoint(sae, cfg, idx)
+
+
+# Hooks for model performance evaluation
+def reconstr_hook(activation, hook, sae_out):
+    return sae_out
+
+
+def zero_abl_hook(activation, hook):
+    return torch.zeros_like(activation)
+
+
+def mean_abl_hook(activation, hook):
+    return activation.mean([0, 1]).expand_as(activation)
+
+
+@torch.no_grad()
+def log_model_performance(
+    idx: int,
+    model: transformer_lens.HookedTransformer,
+    activations_store: ActivationsStore,
+    sae: BaseAutoencoder,
+    index: int = None,
+    batch_tokens: torch.Tensor = None,
+) -> None:
+    """Log the model performance
+
+    Args:
+        idx: int: Index of the batch
+        model: transformer_lens.HookedTransformer: Model
+        activation_store: ActivationsStore: Activations store
+        sae: BaseAutoencoder: SAE
+    """
+    if batch_tokens is None:
+        batch_tokens = activations_store.get_batch_tokens()[
+            : sae.cfg["batch_size"] // sae.cfg["seq_len"]
+        ]
+    batch = activations_store.get_activations(batch_tokens).reshape(
+        -1, sae.cfg["act_size"]
+    )
+
+    sae_output = sae(batch)["sae_out"].reshape(
+        batch_tokens.shape[0], batch_tokens.shape[1], -1
+    )
+
+    original_loss = model(batch_tokens, return_type="loss").item()
+    reconstr_loss = model.run_with_hooks(
+        batch_tokens,
+        fwd_hooks=[(sae.cfg["hook_point"], partial(reconstr_hook, sae_out=sae_output))],
+        return_type="loss",
+    ).item()
+    zero_loss = model.run_with_hooks(
+        batch_tokens,
+        fwd_hooks=[(sae.cfg["hook_point"], zero_abl_hook)],
+        return_type="loss",
+    ).item()
+    mean_loss = model.run_with_hooks(
+        batch_tokens,
+        fwd_hooks=[(sae.cfg["hook_point"], mean_abl_hook)],
+        return_type="loss",
+    ).item()
+
+    ce_degradation = original_loss - reconstr_loss
+    zero_degradation = original_loss - zero_loss
+    mean_degradation = original_loss - mean_loss
+
+    log_dict = {
+        "performance/ce_degradation": ce_degradation,
+        "performance/recovery_from_zero": (reconstr_loss - zero_loss)
+        / zero_degradation,
+        "performance/recovery_from_mean": (reconstr_loss - mean_loss)
+        / mean_degradation,
+    }
+
+    if index is not None:
+        log_dict = {f"{k}_{index}": v for k, v in log_dict.items()}
+
+    mlflow.log_metrics(log_dict, step=idx)
+    return None
+
+
+def save_checkpoint(sae: BaseAutoencoder, cfg: dict, idx: int) -> None:
+    """Save the checkpoint
+
+    Args:
+        sae: BaseAutoencoder: SAE
+        cfg: dict: Configuration
+        idx: int: Index of the batch
+    """
+    save_dir = f"checkpoints/{cfg['name']}"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Save model state
+    sae_path = os.path.join(save_dir, f"sae_{idx}.safetensors")
+    safetensors.torch.save_file(sae.state_dict(), sae_path)
+    logger.info(f"Model saved as {sae_path}")
+    # Prepare config for JSON serialization
+    json_safe_cfg = {}
+    for key, value in cfg.items():
+        if isinstance(value, (int, float, str, bool, type(None))):
+            json_safe_cfg[key] = value
+        elif isinstance(value, (torch.dtype, type)):
+            json_safe_cfg[key] = str(value)
+        else:
+            json_safe_cfg[key] = str(value)
+
+    # Save config
+    config_path = os.path.join(save_dir, f"config_{idx}.json")
+    with open(config_path, "w") as f:
+        json.dump(json_safe_cfg, f, indent=4)
+    logger.info(f"Config saved as {config_path}")
+    # Create and log artifact
+    artifact = mlflow.Artifact(
+        name=f"{cfg['name']}_{idx}",
+        type="model",
+        description=f"Model checkpoint at step {idx}",
+    )
+    artifact.add_file(sae_path)
+    artifact.add_file(config_path)
+    mlflow.log_artifact(artifact)
+
+    logger.info(f"Model and config saved as artifact at step {idx}")
+    return None
 
 def notify_gmail(message: str, subject: str = "SAE Training Notification") -> None:
     """
@@ -305,4 +386,4 @@ def notify_gmail(message: str, subject: str = "SAE Training Notification") -> No
 
 
 if __name__ == "__main__":
-    train_sae()
+    SAETrainer()
