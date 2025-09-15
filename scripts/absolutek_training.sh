@@ -3,13 +3,13 @@ for model_name in "EleutherAI/pythia-70m" "google/gemma-2-2b" "Qwen/Qwen3-4B-Thi
         k=51
         model_layers=(3 4)
     elif [ $model_name == "google/gemma-2-2b" ]; then
-        k=76
+        k=230
         model_layers=(12 16)
     elif [ $model_name == "Qwen/Qwen3-4B-Thinking-2507" ]; then
         k=256
         model_layers=(18 20)
     elif [ $model_name == "openai-community/gpt2" ]; then
-        k=230
+        k=76
         model_layers=(6 8)
     fi
 

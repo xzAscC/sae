@@ -37,7 +37,7 @@ def config() -> argparse.Namespace:
         default="logs/supervised_methods/",
         help="Directory to save logs",
     )
-    parser.add_argument("--model_layer", type=int, default=3, help="Model layer to use")
+    parser.add_argument("--model_layer", type=int, default=12, help="Model layer to use")
     parser.add_argument("--debug_mode", type=bool, default=True, help="Debug mode")
     return parser.parse_args()
 
@@ -53,14 +53,14 @@ def load_concept_dataset(dataset_name: str) -> dict:
     dataset_dict = {}
     dataset = datasets.load_dataset(dataset_name, split="train")
     for idx, data in tqdm(enumerate(dataset), desc="Loading dataset"):
-        if dataset_dict.get(data["output_concept"]) is None:
+        if idx > 500:
+            break
+        elif dataset_dict.get(data["output_concept"]) is None:
             dataset_dict[data["output_concept"]] = []
-        elif len(dataset_dict[data["output_concept"]]) > 100:
+        elif len(dataset_dict[data["output_concept"]]) > 5:
             continue
         else:
             dataset_dict[data["output_concept"]].append(data["output"])
-        if idx > 1100:
-            break
     return dataset_dict
 
 
@@ -90,7 +90,7 @@ def dim_pca_vector(
             .mean(dim=0)
             .to(hidden_states.device)
             .float()
-            - neg_diff_in_means
+            # - neg_diff_in_means
         )
         # PCA
         pca = PCA(n_components=5).fit(
@@ -123,10 +123,10 @@ def extract_dim_pca() -> None:
         assert args.model_layer < 6
         model_layer_name = "gpt_neox"
     elif args.model_name == "google/gemma-2-2b":
-        assert args.model_layer < 12
+        assert args.model_layer < 26
         model_layer_name = "model"
     elif args.model_name == "Qwen/Qwen3-4B-Thinking-2507":
-        assert args.model_layer < 24
+        assert args.model_layer < 36
         model_layer_name = "model"
     else:
         raise ValueError(f"Model {args.model_name} not supported")
@@ -153,14 +153,13 @@ def extract_dim_pca() -> None:
         )
     else: 
         raise ValueError(f"Model {args.model_name} not supported")
-    # fig 2 for heatmap of pca_first_5_components
-    heatmap_fig, heatmap_ax = plt.subplots(keys_len, 1, figsize=(10, keys_len * 10))
     for idx, (key, value) in enumerate(dataset_dict.items()):
         with model.trace(value):
             # hidden states: tuple of [batch_size, seq_len, d_model]
             hidden_states = (
                 getattr(model, model_layer_name).layers[args.model_layer].output.save()
             )
+            torch.cuda.empty_cache()
         if args.debug_mode:
             logger.info(f"Hidden states shape: {len(hidden_states)}")
             logger.info(f"Hidden states shape: {hidden_states[0].shape}")
@@ -177,51 +176,15 @@ def extract_dim_pca() -> None:
 
             # plot the cos similarity between diff_in_means and pca_first_5_components
             cos_similarity = torch.nn.functional.cosine_similarity(
-                diff_in_means, pca_first_5_components, dim=0
+                diff_in_means, pca_first_5_components, dim=1
             )
+            if args.debug_mode:
+                logger.info(f"Cos similarity: {cos_similarity.shape}")
             ax[idx - 1].plot(cos_similarity.detach().cpu().numpy())
             ax[idx - 1].set_title(f"{key}", pad=8, fontsize=10)
-            ax[idx - 1].set_ylim(0, 1)
-            ax[idx - 1].set_xlim(0, 5)
             for lbl in ax[idx - 1].get_xticklabels():
                 lbl.set_rotation(45)
                 lbl.set_ha("right")
-
-            # compute the correlation between pca_first_5_components and diff_in_means
-            cos_sim_pca_first_5_components = torch.empty(5, 5)
-            for i in range(5):
-                for j in range(5):
-                    cos_sim_pca_first_5_components[i, j] = (
-                        torch.nn.functional.cosine_similarity(
-                            pca_first_5_components[i], pca_first_5_components[j], dim=0
-                        )
-                    )
-            if args.debug_mode:
-                logger.info(
-                    f"Cos similarity between pca_first_5_components and diff_in_means: {cos_sim_pca_first_5_components.shape}"
-                )
-
-            # plot the heatmap of pca_first_5_components
-            sns.heatmap(
-                cos_sim_pca_first_5_components.detach().cpu().numpy(),
-                cmap="viridis",
-                xticklabels=False,
-                yticklabels=[
-                    f"PC{i+1}" for i in range(cos_sim_pca_first_5_components.shape[0])
-                ],
-                cbar_kws={"label": "Value"},
-                ax=heatmap_ax[idx - 1],
-            )
-            heatmap_ax[idx - 1].set_title(f"{key}", pad=8, fontsize=10)
-            for lbl in heatmap_ax[idx - 1].get_xticklabels():
-                lbl.set_rotation(45)
-                lbl.set_ha("right")
-                
-    # pca strictly orthogonal
-    heatmap_fig.savefig(
-        f"{args.log_dir}/heatmap_pca_first_5_components_{args.dataset_name.split('/')[-1]}_{args.model_name.split('/')[-1]}_{args.model_layer}.pdf"
-    )
-    plt.close(heatmap_fig)
 
     # save the figure as pdf
     fig.suptitle(
