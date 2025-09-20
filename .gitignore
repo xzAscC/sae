@@ -229,3 +229,6 @@ logs/
 
 # mlflow
 mlruns/
+
+# checkpoints
+checkpoints/

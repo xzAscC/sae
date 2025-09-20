@@ -8,6 +8,7 @@ import transformer_lens
 import mlflow
 import safetensors
 import json
+import huggingface_hub
 from loguru import logger
 from dotenv import load_dotenv
 from utils import seed_setup
@@ -16,9 +17,13 @@ from sae import TopKSAE, BatchTopKSAE, BaseAutoencoder, BatchAbsoluteKSAE, Absol
 from functools import partial
 
 load_dotenv()
+# TODO: early stop
 
 APPRISE_GMAIL = os.getenv("APPRISE_GMAIL")
 APPRISE_PWD = os.getenv("APPRISE_PWD")
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+huggingface_hub.login(HF_TOKEN)
 
 
 def config() -> argparse.Namespace:
@@ -50,11 +55,11 @@ def config() -> argparse.Namespace:
         default="batchabsolutek",
         choices=["topk", "absolutek", "batchabsolutek", "batchtopk"],
     )
-    parser.add_argument("--layer", type=int, default=6)
+    parser.add_argument("--layer", type=int, default=3)
     parser.add_argument("--torch_dtype", type=str, default="bfloat16")
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--aux_penalty", type=float, default=1 / 32)
-    parser.add_argument("--k", type=int, default=76)
+    parser.add_argument("--k", type=int, default=51)
     parser.add_argument("--lr", type=int, default=3e-4)
     parser.add_argument("--steps", type=int, default=10000)
     parser.add_argument("--input_unit_norm", type=bool, default=True)
@@ -64,7 +69,8 @@ def config() -> argparse.Namespace:
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--num_batches_in_buffer", type=int, default=10)
     parser.add_argument("--num_tokens", type=int, default=int(1e9))
-    parser.add_argument("--checkpoint_freq", type=int, default=10000)
+    parser.add_argument("--checkpoint_freq", type=int, default=5000)
+    parser.add_argument("--training_steps", type=int, default=30000)
     parser.add_argument(
         "--n_batches_to_dead",
         type=int,
@@ -97,7 +103,7 @@ def config() -> argparse.Namespace:
     parser.add_argument(
         "--model_name",
         type=str,
-        default="Qwen/Qwen3-4B",
+        default="EleutherAI/pythia-70m",
         choices=[
             "EleutherAI/pythia-70m",
             "google/gemma-2-2b",
@@ -162,7 +168,6 @@ def SAETrainer() -> None:
     # Step 1: Config and logger setup
     args = config()
     model_name, dataset_name = save_args(args)
-
     if args.verbose:
         logger.info("Verbose mode is enabled")
     else:
@@ -223,8 +228,8 @@ def train_sae(
     optimizer = torch.optim.Adam(
         sae.parameters(), lr=cfg["lr"], betas=(cfg["beta1"], cfg["beta2"])
     )
-    pbar = tqdm.trange(num_batches)
-
+    training_steps = cfg["training_steps"]
+    pbar = tqdm.tqdm(range(training_steps))
     mlflow.set_experiment(cfg["name"])
     mlflow.pytorch.autolog()
     mlflow.log_params(cfg)
@@ -266,7 +271,7 @@ def train_sae(
         optimizer.step()
         optimizer.zero_grad()
 
-    save_checkpoint(sae, cfg, idx)
+    save_checkpoint(sae, cfg, training_steps)
 
 
 # Hooks for model performance evaluation
