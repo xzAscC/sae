@@ -96,7 +96,7 @@ class BatchAbsoluteKSAE(BaseAutoencoder):
     def __init__(self, cfg):
         super().__init__(cfg)
 
-    def forward(self, x) -> dict:
+    def forward(self, x, return_dict:bool=True) -> dict:
         """Forward pass
 
         Args:
@@ -122,7 +122,10 @@ class BatchAbsoluteKSAE(BaseAutoencoder):
 
         self.update_inactive_features(acts_topk)
         output = self.get_loss_dict(x, x_reconstruct, acts, acts_topk, x_mean, x_std)
-        return output
+        if return_dict:
+            return output
+        else:
+            return x, x_reconstruct, output
     
     def update_inactive_features(self, acts) -> None:
         """Update the inactive features
@@ -229,12 +232,12 @@ class BatchTopKSAE(BaseAutoencoder):
     def __init__(self, cfg):
         super().__init__(cfg)
 
-    def forward(self, x) -> dict:
+    def forward(self, x, return_dict:bool=True) -> dict:
         """Forward pass
 
         Args:
             x: torch.Tensor: Input tensor
-
+            return_dict: bool: Whether to return the dictionary
         Returns:
             dict: Output dictionary
         """
@@ -252,7 +255,10 @@ class BatchTopKSAE(BaseAutoencoder):
 
         self.update_inactive_features(acts_topk)
         output = self.get_loss_dict(x, x_reconstruct, acts, acts_topk, x_mean, x_std)
-        return output
+        if return_dict:
+            return output
+        else:
+            return x, x_reconstruct, output
 
     def get_loss_dict(self, x, x_reconstruct, acts, acts_topk, x_mean, x_std):
         l2_loss = (x_reconstruct.float() - x.float()).pow(2).mean()
