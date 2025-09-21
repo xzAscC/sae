@@ -30,22 +30,7 @@ class BaseAutoencoder(torch.nn.Module):
             cfg["device"]
         )
 
-        self.to(cfg["dtype"]).to(cfg["device"])
-
-    @classmethod
-    def from_pretrained(cls, checkpoint_path):
-        """Load the model from a checkpoint using safetensors
-
-        Args:
-            checkpoint_path: Checkpoint path
-
-        Returns:
-            BaseAutoencoder: BaseAutoencoder model
-        """
-        checkpoint = safetensors.torch.load_file(checkpoint_path)
-        baseautoencoder = cls(checkpoint["cfg"])
-        baseautoencoder.load_state_dict(checkpoint["state_dict"])
-        return baseautoencoder
+        self.to(cfg["device"]).to(cfg["dtype"])
 
     def preprocess_input(self, x) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Preprocess the input

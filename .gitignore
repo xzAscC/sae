@@ -233,3 +233,4 @@ mlruns_old/
 
 # checkpoints
 checkpoints/
+configs/asset/

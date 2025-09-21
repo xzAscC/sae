@@ -89,6 +89,12 @@ def config() -> argparse.Namespace:
         default=1000,
         help="Frequency of performance logging",
     )
+    parser.add_argument(
+        "--checkpoint_path",
+        type=str,
+        default=None,
+        help="Path to the checkpoint to load",
+    )
 
     ## Optimizer specific
     parser.add_argument(
@@ -206,8 +212,15 @@ def SAETrainer() -> None:
     else:
         raise ValueError(f"Invalid SAE name: {args.sae_name}")
 
+    step = 0
+
+    if cfg["checkpoint_path"] is not None:
+        step = int(cfg["checkpoint_path"].split("/")[-1].split("_")[-1].split(".")[0])
+        checkpoint = safetensors.torch.load_file(cfg["checkpoint_path"])
+        sae.load_state_dict(checkpoint)
+
     # Step 3: Training
-    train_sae(sae, activations_store, model, cfg)
+    train_sae(sae, activations_store, model, cfg, step)
 
     notify_gmail(
         message=f"SAE{args.sae_name}_{model_name}_Layer{args.layer}_{args.dataset} training completed",
@@ -221,6 +234,7 @@ def train_sae(
     activations_store: ActivationsStore,
     model: transformer_lens.HookedTransformer,
     cfg: dict,
+    step: int,
 ) -> None:
     # num_batches = cfg["num_tokens"] // cfg["batch_size"]
     optimizer = torch.optim.Adam(
@@ -233,6 +247,8 @@ def train_sae(
     mlflow.log_params(cfg)
 
     for idx in pbar:
+        if idx < step:
+            continue
         batch = activations_store.next_batch()
         sae_output = sae(batch)
         mlflow.log_metrics(
