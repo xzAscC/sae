@@ -381,7 +381,7 @@ class JumpReLUSAE(BaseAutoencoder):
         self.dtype = cfg["dtype"]
         self.device = cfg["device"]
 
-    def forward(self, x, use_pre_enc_bias=False):
+    def forward(self, x, use_pre_enc_bias=False, return_dict=True, select_topK=False):
         x, x_mean, x_std = self.preprocess_input(x)
 
         if use_pre_enc_bias:
@@ -389,12 +389,17 @@ class JumpReLUSAE(BaseAutoencoder):
 
         pre_activations = torch.relu(x @ self.W_enc + self.b_enc)
         feature_magnitudes = self.jumprelu(pre_activations)
+        if select_topK:
+            topk = torch.topk(feature_magnitudes, self.cfg["k"], dim=-1)
+            feature_magnitudes = torch.zeros_like(feature_magnitudes)
+            feature_magnitudes.scatter_(-1, topk.indices, topk.values)
+            
         feature_magnitudes = feature_magnitudes.to(self.dtype)
         x_reconstructed = feature_magnitudes @ self.W_dec + self.b_dec
 
-        return self.get_loss_dict(x, x_reconstructed, feature_magnitudes, x_mean, x_std)
+        return self.get_loss_dict(x, x_reconstructed, feature_magnitudes, x_mean, x_std, return_dict)
 
-    def get_loss_dict(self, x, x_reconstruct, acts, x_mean, x_std):
+    def get_loss_dict(self, x, x_reconstruct, acts, x_mean, x_std, return_dict=True):
         l2_loss = (x_reconstruct.float() - x.float()).pow(2).mean()
 
         l0 = StepFunction.apply(acts, self.jumprelu.log_threshold, self.cfg["bandwidth"]).sum(dim=-1).mean()
@@ -419,4 +424,7 @@ class JumpReLUSAE(BaseAutoencoder):
             "positive_features": (acts > 0).float().sum(-1).mean(),
             "negative_features": (acts < 0).float().sum(-1).mean(),
         }
-        return output
+        if return_dict:
+            return output
+        else:
+            return x, x_reconstruct, output

@@ -1,7 +1,7 @@
 for model_name in "EleutherAI/pythia-70m" "openai-community/gpt2"; do
     if [ $model_name == "EleutherAI/pythia-70m" ]; then
         k=51
-        model_layers=(3 4)
+        model_layers=(4)
     elif [ $model_name == "google/gemma-2-2b" ]; then
         k=230
         model_layers=(12 16)

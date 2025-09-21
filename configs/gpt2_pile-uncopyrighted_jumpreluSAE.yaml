@@ -4,6 +4,7 @@ batch_size: 128
 beta1: 0.9
 beta2: 0.99
 checkpoint_freq: 5000
+checkpoint_path: null
 config_save_path: ./configs/
 dataset: monology/pile-uncopyrighted
 device: cuda

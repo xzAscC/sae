@@ -233,5 +233,8 @@ mlruns_old/
 
 # checkpoints
 checkpoints/
+
+# assets
+assets/
 configs/asset/
 *.pdf
