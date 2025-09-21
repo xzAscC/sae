@@ -1,5 +1,5 @@
-from huggingface_hub import parse_safetensors_file_metadata
 import torch
+import safetensors
 from loguru import logger
 
 
@@ -31,6 +31,21 @@ class BaseAutoencoder(torch.nn.Module):
         )
 
         self.to(cfg["dtype"]).to(cfg["device"])
+
+    @classmethod
+    def from_pretrained(cls, checkpoint_path):
+        """Load the model from a checkpoint using safetensors
+
+        Args:
+            checkpoint_path: Checkpoint path
+
+        Returns:
+            BaseAutoencoder: BaseAutoencoder model
+        """
+        checkpoint = safetensors.torch.load_file(checkpoint_path)
+        baseautoencoder = cls(checkpoint["cfg"])
+        baseautoencoder.load_state_dict(checkpoint["state_dict"])
+        return baseautoencoder
 
     def preprocess_input(self, x) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Preprocess the input
